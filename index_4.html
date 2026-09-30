@@ -1,0 +1,2145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Paper Tracker — Research Reading Manager</title>
+<meta name="description" content="A self-hosted, single-file app to track papers to read, take notes, visualize connections, and prioritize your reading list." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📚</text></svg>" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<style>
+/* ============================= THEME ============================= */
+:root{
+  --bg:#f5f6fa; --bg-elev:#ffffff; --bg-sunken:#eceef4;
+  --text:#1c2333; --text-dim:#5b6478; --text-faint:#8991a3;
+  --border:#e0e3ec; --border-soft:#eceef4;
+  --accent:#5b5bd6; --accent-2:#2fb7a3; --accent-soft:#eeeeff;
+  --danger:#e0555f; --warn:#dd9a2e; --good:#2fa36b;
+  --shadow:0 1px 2px rgba(20,20,43,.06), 0 4px 16px rgba(20,20,43,.06);
+  --shadow-lg:0 8px 24px rgba(20,20,43,.14), 0 2px 6px rgba(20,20,43,.08);
+  --radius:14px; --radius-sm:9px;
+  --col-toread:#7c83e8; --col-reading:#dd9a2e; --col-read:#2fa36b; --col-ref:#8991a3;
+  color-scheme: light;
+  /* Graph canvases are deliberately always-dark (Obsidian-style), independent of app theme */
+  --graph-bg:#0a0c12; --graph-bg-2:#0e1118;
+  --graph-node-paper:#7c9bff; --graph-node-note:#f2c14e; --graph-node-secondary:#4a5064;
+  --graph-node-stub:#5d6379;
+  --graph-edge:rgba(255,255,255,.16); --graph-edge-hl:#8fd6ff;
+  --graph-text:rgba(255,255,255,.88); --graph-text-dim:rgba(255,255,255,.4);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#14161f; --bg-elev:#1b1e2a; --bg-sunken:#10121a;
+    --text:#e8e9f2; --text-dim:#a3aabf; --text-faint:#6b7185;
+    --border:#2a2e3d; --border-soft:#232635;
+    --accent:#8788ee; --accent-2:#4fd0ba; --accent-soft:#252a4a;
+    --danger:#ea6b73; --warn:#e8ac4c; --good:#4bc189;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 4px 20px rgba(0,0,0,.35);
+    --shadow-lg:0 12px 32px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.4);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#14161f; --bg-elev:#1b1e2a; --bg-sunken:#10121a;
+  --text:#e8e9f2; --text-dim:#a3aabf; --text-faint:#6b7185;
+  --border:#2a2e3d; --border-soft:#232635;
+  --accent:#8788ee; --accent-2:#4fd0ba; --accent-soft:#252a4a;
+  --danger:#ea6b73; --warn:#e8ac4c; --good:#4bc189;
+  --shadow:0 1px 2px rgba(0,0,0,.3), 0 4px 20px rgba(0,0,0,.35);
+  --shadow-lg:0 12px 32px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.4);
+  color-scheme: dark;
+}
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  font-size:14px; line-height:1.5;
+}
+button, input, select, textarea{font-family:inherit; font-size:inherit; color:inherit;}
+button{cursor:pointer;}
+a{color:var(--accent);}
+::-webkit-scrollbar{width:10px; height:10px;}
+::-webkit-scrollbar-thumb{background:var(--border); border-radius:8px;}
+::-webkit-scrollbar-track{background:transparent;}
+
+/* ============================= LAYOUT ============================= */
+#app{display:flex; flex-direction:column; height:100vh;}
+header.topbar{
+  display:flex; align-items:center; gap:14px; padding:10px 18px;
+  background:var(--bg-elev); border-bottom:1px solid var(--border); flex-wrap:wrap;
+  position:relative; z-index:20;
+}
+.brand{display:flex; align-items:center; gap:8px; font-weight:700; font-size:16px; white-space:nowrap;}
+.brand .logo{font-size:20px;}
+.view-switch{display:flex; gap:4px; background:var(--bg-sunken); padding:4px; border-radius:10px;}
+.view-switch button{
+  border:none; background:transparent; padding:7px 14px; border-radius:7px; font-weight:600;
+  color:var(--text-dim); display:flex; align-items:center; gap:6px;
+}
+.view-switch button.active{background:var(--bg-elev); color:var(--accent); box-shadow:var(--shadow);}
+.search-wrap{flex:1; min-width:160px; position:relative;}
+.search-wrap input{
+  width:100%; padding:8px 12px 8px 32px; border-radius:9px; border:1px solid var(--border);
+  background:var(--bg-sunken); outline:none;
+}
+.search-wrap input:focus{border-color:var(--accent);}
+.search-wrap::before{content:"🔍"; position:absolute; left:10px; top:50%; transform:translateY(-50%); font-size:12px; opacity:.6;}
+.topbar-actions{display:flex; gap:8px; align-items:center;}
+.btn{
+  border:1px solid var(--border); background:var(--bg-elev); padding:8px 13px; border-radius:9px;
+  font-weight:600; display:inline-flex; align-items:center; gap:6px; white-space:nowrap;
+  transition:transform .05s ease, box-shadow .15s ease;
+}
+.btn:hover{box-shadow:var(--shadow);}
+.btn:active{transform:scale(.97);}
+.btn-primary{background:var(--accent); color:#fff; border-color:var(--accent);}
+.btn-ghost{background:transparent; border-color:transparent;}
+.btn-icon{padding:8px 9px;}
+.btn-sm{padding:5px 9px; font-size:12px; border-radius:7px;}
+.btn-danger{color:var(--danger); border-color:var(--danger);}
+
+main{flex:1; overflow:hidden; position:relative; display:flex; flex-direction:column;}
+.filter-bar{
+  display:flex; gap:8px; align-items:center; padding:8px 18px; background:var(--bg-elev);
+  border-bottom:1px solid var(--border-soft); flex-wrap:wrap; font-size:12.5px;
+}
+.filter-bar .tag-chip{
+  border:1px solid var(--border); background:var(--bg-sunken); padding:4px 10px; border-radius:100px;
+  color:var(--text-dim); font-weight:600; display:inline-flex; align-items:center; gap:5px;
+}
+.filter-bar .tag-chip.active{background:var(--accent-soft); color:var(--accent); border-color:var(--accent);}
+.filter-bar select{border:1px solid var(--border); background:var(--bg-sunken); border-radius:7px; padding:5px 8px;}
+.spacer{flex:1;}
+.view-pane{flex:1; overflow:auto; padding:16px 18px 40px;}
+.view-pane.no-scroll{overflow:hidden; padding:0;}
+.hidden{display:none !important;}
+
+/* ============================= BOARD ============================= */
+.board{display:flex; gap:14px; height:100%; align-items:flex-start;}
+.column{
+  background:var(--bg-sunken); border-radius:var(--radius); min-width:270px; max-width:300px;
+  display:flex; flex-direction:column; max-height:100%; flex-shrink:0;
+}
+.column-head{
+  padding:12px 14px 8px; display:flex; align-items:center; gap:8px; font-weight:700;
+}
+.column-dot{width:9px; height:9px; border-radius:50%; flex-shrink:0;}
+.column-count{
+  margin-left:auto; background:var(--bg-elev); border-radius:100px; padding:1px 8px; font-size:11.5px;
+  color:var(--text-dim); font-weight:700;
+}
+.column-body{flex:1; overflow-y:auto; padding:4px 10px 10px; min-height:60px;}
+.column-add{margin:0 10px 10px; }
+.add-col-btn{
+  min-width:210px; max-width:230px; height:44px; border:1.5px dashed var(--border); border-radius:var(--radius);
+  background:transparent; color:var(--text-faint); font-weight:600; flex-shrink:0;
+}
+
+.card{
+  background:var(--bg-elev); border-radius:var(--radius-sm); padding:10px 11px; margin-bottom:8px;
+  box-shadow:var(--shadow); border:1px solid var(--border-soft); cursor:grab;
+}
+.card:active{cursor:grabbing;}
+.card.sortable-ghost{opacity:.35;}
+.card-title{font-weight:700; font-size:13.3px; margin-bottom:3px; line-height:1.35;}
+.card-meta{color:var(--text-dim); font-size:11.7px; margin-bottom:6px;}
+.card-row{display:flex; align-items:center; flex-wrap:wrap; gap:5px; margin-top:6px;}
+.badge{
+  font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:100px; display:inline-flex; align-items:center; gap:3px;
+}
+.badge-priority-4{background:#fde3e3; color:#b3272f;}
+.badge-priority-3{background:#fdecd6; color:#a8631a;}
+.badge-priority-2{background:#e6effd; color:#2864c9;}
+.badge-priority-1{background:var(--bg-sunken); color:var(--text-faint);}
+:root[data-theme="dark"] .badge-priority-4, @media (prefers-color-scheme:dark){}
+.badge-cite{background:var(--bg-sunken); color:var(--text-dim);}
+.badge-score{background:var(--accent-soft); color:var(--accent);}
+.tag-pill{
+  font-size:10.3px; background:var(--bg-sunken); color:var(--text-dim); padding:2px 7px; border-radius:100px;
+}
+
+/* ============================= LIST ============================= */
+table.plist{width:100%; border-collapse:collapse; background:var(--bg-elev); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow);}
+table.plist th{
+  text-align:left; padding:10px 12px; background:var(--bg-sunken); color:var(--text-dim);
+  font-size:11.5px; text-transform:uppercase; letter-spacing:.03em; cursor:pointer; position:sticky; top:0;
+  user-select:none;
+}
+table.plist th:hover{color:var(--accent);}
+table.plist td{padding:10px 12px; border-top:1px solid var(--border-soft); vertical-align:top; font-size:13px;}
+table.plist tr:hover td{background:var(--bg-sunken);}
+table.plist tr{cursor:pointer;}
+.status-pill{padding:3px 9px; border-radius:100px; font-size:11px; font-weight:700; color:#fff; display:inline-block;}
+.score-bar-wrap{width:70px; height:6px; background:var(--bg-sunken); border-radius:4px; overflow:hidden; display:inline-block; vertical-align:middle; margin-right:6px;}
+.score-bar{height:100%; background:linear-gradient(90deg, var(--accent-2), var(--accent));}
+
+/* ============================= GRAPH (Obsidian-style, always dark canvas) ============================= */
+.graph-wrap{position:relative; width:100%; height:100%; background:radial-gradient(ellipse at 50% 35%, var(--graph-bg-2), var(--graph-bg) 70%);}
+.graph-wrap svg{width:100%; height:100%; display:block;}
+.obsidian-svg{background:transparent;}
+.graph-legend{
+  position:absolute; bottom:14px; left:14px; background:rgba(20,22,32,.82); border:1px solid rgba(255,255,255,.1);
+  border-radius:var(--radius-sm); padding:10px 12px; box-shadow:var(--shadow); font-size:11.5px; color:rgba(255,255,255,.7);
+  backdrop-filter:blur(6px); max-width:230px;
+}
+.graph-legend div{display:flex; align-items:center; gap:6px; margin:3px 0;}
+.legend-dot{width:9px; height:9px; border-radius:50%; flex:none;}
+.graph-hint{position:absolute; top:14px; right:14px; background:rgba(20,22,32,.82); border:1px solid rgba(255,255,255,.1);
+  border-radius:var(--radius-sm); padding:8px 12px; box-shadow:var(--shadow); font-size:11.5px; color:rgba(255,255,255,.55); max-width:230px;
+  backdrop-filter:blur(6px);}
+.node-label{font-size:10.5px; fill:var(--graph-text); pointer-events:none; font-weight:600;}
+.node-label.secondary-label{fill:var(--graph-text-dim); font-style:italic; font-weight:500; opacity:0; transition:opacity .2s ease;}
+.pnode.hl .node-label.secondary-label{opacity:1;}
+.link-line{stroke:var(--graph-edge); stroke-opacity:.85; transition:stroke .2s ease, stroke-opacity .2s ease, opacity .2s ease;}
+.link-line.manual, .link-line.wikilink{stroke:var(--graph-edge);}
+.link-line.tag{stroke-dasharray:2,3; stroke:rgba(255,255,255,.22);}
+.link-line.hl{stroke:var(--graph-edge-hl); stroke-opacity:1;}
+.link-line.dim{opacity:.08;}
+.note-shape{stroke:rgba(0,0,0,.35); stroke-width:1.5;}
+.note-shape.stub{stroke-dasharray:3,2; fill-opacity:.6;}
+.pnode circle, .pnode rect{transition:opacity .2s ease, filter .2s ease;}
+.pnode.dim{opacity:.15;}
+.pnode.dim .node-label{opacity:0;}
+.pnode.hl circle, .pnode.hl rect{filter:drop-shadow(0 0 7px currentColor);}
+.pnode.kind-note circle, .pnode.kind-note rect{color:var(--graph-node-note);}
+.pnode.kind-paper circle, .pnode.kind-paper rect{color:var(--graph-node-paper);}
+.pnode.hub:not(.secondary) circle, .pnode.hub:not(.secondary) rect{filter:drop-shadow(0 0 5px currentColor);}
+.pnode.secondary .node-label{font-size:9px;}
+.graph-zoom-controls{position:absolute; bottom:14px; right:14px; display:flex; flex-direction:column; gap:4px;}
+.graph-zoom-controls button{
+  width:30px; height:30px; border-radius:8px; border:1px solid rgba(255,255,255,.14); background:rgba(30,33,46,.85);
+  color:rgba(255,255,255,.85); box-shadow:var(--shadow); font-weight:700; font-size:15px; display:flex; align-items:center; justify-content:center;
+}
+.graph-toolbar label.tag-toggle{
+  display:flex; align-items:center; gap:6px; background:rgba(30,33,46,.85); border:1px solid rgba(255,255,255,.14);
+  border-radius:9px; padding:7px 11px; font-size:12px; font-weight:600; box-shadow:var(--shadow); color:rgba(255,255,255,.75);
+}
+.graph-toolbar{position:absolute; top:14px; left:14px; display:flex; gap:8px; flex-wrap:wrap;}
+.graph-toolbar .btn-sm{background:rgba(30,33,46,.85); color:#fff; border:1px solid rgba(255,255,255,.14);}
+.graph-toolbar .btn-sm:hover{background:rgba(45,49,66,.95);}
+
+/* ============================= MODALS ============================= */
+.overlay{
+  position:fixed; inset:0; background:rgba(10,12,20,.45); display:flex; align-items:flex-start; justify-content:center;
+  padding:4vh 16px; overflow-y:auto; z-index:100; backdrop-filter:blur(2px);
+}
+.modal{
+  background:var(--bg-elev); border-radius:16px; box-shadow:var(--shadow-lg); width:100%; margin-bottom:4vh;
+  border:1px solid var(--border);
+}
+.modal.modal-sm{max-width:420px;}
+.modal.modal-md{max-width:640px;}
+.modal.modal-lg{max-width:940px;}
+.modal.modal-xl{max-width:1280px; width:94vw;}
+.modal-head{display:flex; align-items:center; gap:10px; padding:16px 20px; border-bottom:1px solid var(--border-soft);}
+.modal-head h2{font-size:16px; margin:0; flex:1;}
+.modal-body{padding:18px 20px; max-height:74vh; overflow-y:auto;}
+.modal-xl .modal-body{display:flex; flex-direction:column; max-height:86vh; padding:20px 24px;}
+.modal-xl .notes-editor-grid{flex:1 1 auto; min-height:0;}
+.modal-xl .notes-editor-grid > div{display:flex; flex-direction:column; min-height:0;}
+.modal-xl .notes-editor-grid textarea{flex:1; min-height:360px; resize:none; font-size:14px; line-height:1.65; padding:14px;}
+.modal-xl .notes-editor-grid .md-preview{flex:1; max-height:none; overflow-y:auto; padding:14px 16px;}
+.modal-xl .backlink-list{max-height:130px; overflow-y:auto;}
+.note-title-input{font-size:19px; font-weight:800; padding:10px 12px;}
+.modal-foot{display:flex; justify-content:flex-end; gap:8px; padding:14px 20px; border-top:1px solid var(--border-soft);}
+.field{margin-bottom:13px;}
+.field label{display:block; font-weight:700; font-size:12px; color:var(--text-dim); margin-bottom:5px;}
+.field input, .field select, .field textarea{
+  width:100%; padding:9px 11px; border:1px solid var(--border); border-radius:9px; background:var(--bg-sunken);
+  outline:none;
+}
+.field input:focus, .field select:focus, .field textarea:focus{border-color:var(--accent); background:var(--bg-elev);}
+.field textarea{resize:vertical; min-height:70px;}
+.field-hint{font-size:11px; color:var(--text-faint); margin-top:4px;}
+.field-row{display:flex; gap:12px;}
+.field-row .field{flex:1;}
+.tabs{display:flex; gap:2px; border-bottom:1px solid var(--border-soft); margin-bottom:14px;}
+.tabs button{padding:9px 4px; margin-right:18px; border:none; background:none; font-weight:700; color:var(--text-faint); border-bottom:2px solid transparent;}
+.tabs button.active{color:var(--accent); border-color:var(--accent);}
+.tabpane{display:none;}
+.tabpane.active{display:block;}
+
+.toast-stack{position:fixed; bottom:18px; right:18px; z-index:300; display:flex; flex-direction:column; gap:8px;}
+.toast{background:var(--text); color:var(--bg-elev); padding:10px 16px; border-radius:9px; box-shadow:var(--shadow-lg); font-size:12.7px; max-width:320px; animation:slidein .18s ease;}
+.toast.err{background:var(--danger);}
+.toast.ok{background:var(--good);}
+@keyframes slidein{from{transform:translateY(10px); opacity:0;} to{transform:translateY(0); opacity:1;}}
+
+.empty-state{display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:var(--text-faint); gap:10px; text-align:center;}
+.empty-state .big{font-size:40px;}
+
+.stars{display:inline-flex; gap:2px;}
+.stars button{background:none; border:none; padding:2px; font-size:16px; color:var(--border); line-height:1;}
+.stars button.on{color:var(--warn);}
+
+.md-preview{background:var(--bg-sunken); border-radius:9px; padding:12px; font-size:13px; min-height:60px; overflow-x:auto;}
+.md-preview p:first-child{margin-top:0;} .md-preview p:last-child{margin-bottom:0;}
+.md-preview code{background:var(--bg-elev); padding:1px 5px; border-radius:4px;}
+.md-preview:empty::before{content:"Preview appears here as you type…"; color:var(--text-faint); font-style:italic;}
+.notes-toolbar{display:flex; gap:6px; margin-bottom:6px; align-items:center;}
+.notes-editor-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+.notes-editor-grid textarea{min-height:320px; padding:12px; line-height:1.6;}
+.notes-editor-grid .md-preview{max-height:380px; padding:12px 14px;}
+.notes-pane-label{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--text-faint); margin-bottom:4px;}
+@media (max-width:820px){
+  .notes-editor-grid{grid-template-columns:1fr;}
+}
+
+.detail-meta-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px;}
+.stat-tile{background:var(--bg-sunken); border-radius:10px; padding:10px 12px;}
+.stat-tile .num{font-size:19px; font-weight:800;}
+.stat-tile .lbl{font-size:11px; color:var(--text-faint); font-weight:600; text-transform:uppercase; letter-spacing:.02em;}
+
+.related-list{display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;}
+.related-chip{background:var(--bg-sunken); border:1px solid var(--border); border-radius:100px; padding:4px 10px; font-size:11.5px; display:flex; gap:6px; align-items:center;}
+.related-chip button{background:none; border:none; color:var(--text-faint); font-size:13px; padding:0;}
+
+.switch{position:relative; display:inline-block; width:38px; height:21px; flex-shrink:0;}
+.switch input{opacity:0; width:0; height:0;}
+.slider-tog{position:absolute; cursor:pointer; inset:0; background:var(--border); border-radius:100px; transition:.15s;}
+.slider-tog:before{content:""; position:absolute; height:16px; width:16px; left:2.5px; top:2.5px; background:#fff; border-radius:50%; transition:.15s;}
+input:checked + .slider-tog{background:var(--accent);}
+input:checked + .slider-tog:before{transform:translateX(17px);}
+.settings-section{margin-bottom:22px; padding-bottom:18px; border-bottom:1px solid var(--border-soft);}
+.settings-section:last-child{border-bottom:none;}
+.settings-section h3{font-size:13.5px; margin:0 0 4px;}
+.settings-section p.desc{color:var(--text-faint); font-size:12px; margin:0 0 12px;}
+.weight-row{display:flex; align-items:center; gap:10px; margin-bottom:10px;}
+.weight-row label{width:110px; font-size:12.5px; font-weight:600; flex-shrink:0;}
+.weight-row input[type=range]{flex:1;}
+.weight-row .val{width:34px; text-align:right; font-size:12px; color:var(--text-dim); font-weight:700;}
+kbd{background:var(--bg-sunken); border:1px solid var(--border); border-radius:5px; padding:1px 6px; font-size:11px;}
+
+/* ============================= NOTES / WIKILINKS / MATH ============================= */
+.md-preview .katex{font-size:1.05em;}
+.md-preview .katex-display{margin:0.6em 0; overflow-x:auto; overflow-y:hidden;}
+.wikilink-chip{
+  background:var(--accent-soft); color:var(--accent); padding:1px 6px; border-radius:6px; font-weight:600;
+  text-decoration:none; cursor:pointer; border-bottom:1px dashed var(--accent);
+}
+.wikilink-chip.stub{color:var(--text-faint); background:var(--bg-sunken); border-bottom-style:dotted;}
+.notes-hint{font-size:11px; color:var(--text-faint); margin:6px 0 8px;}
+.backlink-list{display:flex; flex-direction:column; gap:6px; margin-top:8px;}
+.backlink-item{
+  display:flex; align-items:center; gap:8px; background:var(--bg-sunken); border-radius:9px; padding:8px 10px;
+  cursor:pointer; border:1px solid transparent;
+}
+.backlink-item:hover{border-color:var(--accent);}
+.backlink-item .kind-dot{width:8px; height:8px; border-radius:50%; flex-shrink:0;}
+details.more-fields{margin:2px 0 14px;}
+details.more-fields > summary{
+  cursor:pointer; font-weight:700; font-size:12px; color:var(--accent); list-style:none; user-select:none;
+  padding:6px 0; display:flex; align-items:center; gap:5px;
+}
+details.more-fields > summary::-webkit-details-marker{display:none;}
+details.more-fields > summary::before{content:"▸"; transition:transform .15s;}
+details.more-fields[open] > summary::before{transform:rotate(90deg);}
+details.more-fields > summary:after{content:"Advanced fields (venue, DOI, URL, abstract…)";}
+details.more-fields > summary.has-label:after{content:none;}
+
+/* streak / activity widget */
+.streak-btn{
+  border:1px solid var(--border); background:var(--bg-elev); padding:7px 12px; border-radius:9px; font-weight:800;
+  font-size:12.5px; display:flex; align-items:center; gap:5px; transition:box-shadow .2s ease, border-color .2s ease, transform .1s ease;
+}
+.streak-btn:hover{transform:translateY(-1px);}
+.streak-btn.is-active{border-color:color-mix(in srgb, var(--warn) 50%, var(--border)); box-shadow:0 0 0 1px color-mix(in srgb, var(--warn) 25%, transparent), 0 2px 10px color-mix(in srgb, var(--warn) 25%, transparent);}
+.streak-pop{padding:4px 2px;}
+.streak-stats{display:flex; gap:0; margin-bottom:14px; border:1px solid var(--border-soft); border-radius:var(--radius-sm); overflow:hidden;}
+.streak-stats > div{flex:1; text-align:center; padding:12px 6px; border-right:1px solid var(--border-soft);}
+.streak-stats > div:last-child{border-right:none;}
+.streak-stats .num{font-size:24px; font-weight:800; line-height:1.1;}
+.streak-stats .lbl{font-size:10px; color:var(--text-faint); font-weight:700; letter-spacing:.03em; margin-top:3px;}
+.heatmap-wrap{display:flex; gap:6px; align-items:flex-start; margin:12px 0 6px;}
+.heatmap-days{display:grid; grid-template-rows:repeat(7,11px); gap:3px; font-size:8.5px; color:var(--text-faint); line-height:11px; text-align:right; padding-top:1px;}
+.heatmap{display:grid; grid-auto-flow:column; grid-template-rows:repeat(7,11px); gap:3px;}
+.heat-cell{width:11px; height:11px; border-radius:3px; background:var(--bg-sunken); border:1px solid var(--border-soft);}
+.heat-cell[data-lvl="1"]{background:color-mix(in srgb, var(--accent-2) 35%, var(--bg-sunken)); border-color:transparent;}
+.heat-cell[data-lvl="2"]{background:color-mix(in srgb, var(--accent-2) 65%, var(--bg-sunken)); border-color:transparent;}
+.heat-cell[data-lvl="3"]{background:var(--accent-2); border-color:transparent;}
+.heatmap-legend{display:flex; align-items:center; gap:4px; font-size:10.5px; color:var(--text-faint); margin-top:4px; justify-content:flex-end;}
+.heatmap-legend .heat-cell{width:10px; height:10px;}
+.streak-stats{display:flex; gap:18px; margin-bottom:4px;}
+.streak-stats .num{font-size:22px; font-weight:800;}
+.streak-stats .lbl{font-size:11px; color:var(--text-faint); font-weight:600;}
+.reminder-row{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;}
+
+@media (max-width:720px){
+  .detail-meta-grid{grid-template-columns:1fr;}
+  .field-row{flex-direction:column;}
+  .board{flex-direction:column;}
+  .column{max-width:100%; width:100%;}
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header class="topbar">
+    <div class="brand"><span class="logo">📚</span> Paper Tracker</div>
+    <div class="view-switch" id="viewSwitch">
+      <button data-view="board" class="active">🗂️ Board</button>
+      <button data-view="graph">🕸️ Papers graph</button>
+      <button data-view="notesgraph">🧠 Notes graph</button>
+      <button data-view="list">📋 List</button>
+    </div>
+    <div class="search-wrap"><input id="searchInput" placeholder="Search title, author, tag…" /></div>
+    <div class="topbar-actions">
+      <button class="streak-btn" id="btnStreak" title="Your writing streak"></button>
+      <button class="btn btn-primary" id="btnAddPaper">＋ Add paper</button>
+      <button class="btn btn-icon" id="btnSettings" title="Settings">⚙️</button>
+      <button class="btn btn-icon" id="btnTheme" title="Toggle theme">🌓</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="filter-bar" id="filterBar">
+      <select id="sortSelect" title="Sort">
+        <option value="smart">Sort: Smart score</option>
+        <option value="recent">Sort: Recently added</option>
+        <option value="year">Sort: Year (newest)</option>
+        <option value="citations">Sort: Citations</option>
+        <option value="title">Sort: Title (A–Z)</option>
+      </select>
+      <div id="tagChips" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+      <div class="spacer"></div>
+      <span id="resultCount" style="color:var(--text-faint);"></span>
+    </div>
+
+    <div class="view-pane" id="viewPane">
+      <div id="boardView" class="board"></div>
+      <div id="graphView" class="graph-wrap hidden"></div>
+      <div id="notesGraphView" class="graph-wrap hidden"></div>
+      <div id="listView" class="hidden"></div>
+    </div>
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+<div class="toast-stack" id="toastStack"></div>
+
+<script>
+/* =====================================================================
+   PAPER TRACKER — single-file research reading manager
+   Storage: localStorage (per-browser) + optional GitHub-repo JSON sync
+   Metadata & citation lookups: Semantic Scholar Graph API + CrossRef
+   ===================================================================== */
+(function(){
+"use strict";
+
+const LS_PAPERS = "pt_papers_v1";
+const LS_SETTINGS = "pt_settings_v1";
+const LS_THEME = "pt_theme_v1";
+const LS_NOTES = "pt_notes_v1";
+const LS_ACTIVITY = "pt_activity_v1";
+
+const DEFAULT_COLUMNS = [
+  {id:"toread", label:"To Read", color:"var(--col-toread)"},
+  {id:"reading", label:"Reading", color:"var(--col-reading)"},
+  {id:"read", label:"Read", color:"var(--col-read)"},
+  {id:"reference", label:"Reference", color:"var(--col-ref)"}
+];
+
+const DEFAULT_SETTINGS = {
+  columns: DEFAULT_COLUMNS,
+  weights: {citation:0.3, recency:0.2, manual:0.3, tag:0.2},
+  interestTags: [],
+  github: {owner:"", repo:"", branch:"main", path:"data/papers.json", token:""},
+  zotero: {userId:"", apiKey:""},
+  reminder: {time:"19:00", days:"daily", ntfyTopic:""},
+  seeded:false
+};
+
+function uid(){ return 'p_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36); }
+function nowIso(){ return new Date().toISOString(); }
+function debounce(fn, ms){ let t; return (...a)=>{clearTimeout(t); t=setTimeout(()=>fn(...a), ms);}; }
+function escapeHtml(s){ return (s||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function clamp(n,a,b){ return Math.max(a, Math.min(b,n)); }
+
+/* ------------------------------ STATE ------------------------------ */
+let papers = [];
+let notes = [];       // standalone, Obsidian-style atomic notes (created via [[wikilinks]] or "+ New note")
+let activity = {};    // map of "YYYY-MM-DD" -> number of saves that day (local calendar day)
+let settings = structuredClone(DEFAULT_SETTINGS);
+let currentView = "board";
+let searchQuery = "";
+let activeTagFilter = null;
+let sortMode = "smart";
+
+function loadState(){
+  try{
+    const rawP = localStorage.getItem(LS_PAPERS);
+    papers = rawP ? JSON.parse(rawP) : null;
+  }catch(e){ papers = null; }
+  try{
+    const rawS = localStorage.getItem(LS_SETTINGS);
+    if(rawS) settings = Object.assign(structuredClone(DEFAULT_SETTINGS), JSON.parse(rawS));
+  }catch(e){ /* keep defaults */ }
+  try{
+    const rawN = localStorage.getItem(LS_NOTES);
+    notes = rawN ? JSON.parse(rawN) : [];
+  }catch(e){ notes = []; }
+  try{
+    const rawA = localStorage.getItem(LS_ACTIVITY);
+    activity = normalizeActivity(rawA ? JSON.parse(rawA) : {});
+  }catch(e){ activity = {}; }
+
+  if(!papers){
+    papers = sampleData();
+    notes = sampleNotes();
+    settings.seeded = true;
+    saveSettings(); saveNotes();
+  }
+  const theme = localStorage.getItem(LS_THEME);
+  if(theme) document.documentElement.setAttribute('data-theme', theme);
+}
+function savePapers(){ localStorage.setItem(LS_PAPERS, JSON.stringify(papers)); }
+function saveSettings(){ localStorage.setItem(LS_SETTINGS, JSON.stringify(settings)); }
+function saveNotes(){ localStorage.setItem(LS_NOTES, JSON.stringify(notes)); }
+function saveActivity(){ localStorage.setItem(LS_ACTIVITY, JSON.stringify(activity)); }
+// Accepts either the current {date: count} map or the old array-of-date-strings format
+// (from an older backup/localStorage) and normalizes to the map shape used everywhere now.
+function normalizeActivity(a){
+  if(Array.isArray(a)) return a.reduce((m,d)=>{ m[d]=1; return m; }, {});
+  return (a && typeof a==='object') ? a : {};
+}
+
+function sampleData(){
+  const t = Date.now();
+  return [
+    {id:uid(), title:"Attention Is All You Need", authors:"Vaswani et al.", year:2017,
+     venue:"NeurIPS", doi:"10.48550/arXiv.1706.03762", arxivId:"1706.03762", url:"https://arxiv.org/abs/1706.03762",
+     abstract:"Introduces the Transformer, a sequence transduction model based entirely on attention mechanisms.",
+     tags:["transformers","nlp","architecture"], status:"read", priority:4, rating:5,
+     citations:130000, citationsUpdated:nowIso(), notes:"# Why it matters\nFoundational architecture for nearly all modern LLMs.\n\n- Self-attention replaces recurrence\n- Enables massive parallelization",
+     relatedIds:[], dateAdded:new Date(t-1000*60*60*24*40).toISOString()},
+    {id:uid(), title:"Deep Residual Learning for Image Recognition", authors:"He et al.", year:2015,
+     venue:"CVPR", doi:"10.1109/CVPR.2016.90", arxivId:"1512.03385", url:"https://arxiv.org/abs/1512.03385",
+     abstract:"Introduces residual connections (ResNet) enabling training of very deep networks.",
+     tags:["vision","architecture","deep-learning"], status:"reference", priority:3, rating:4,
+     citations:190000, citationsUpdated:nowIso(), notes:"Residual/skip connections solve vanishing gradients in very deep nets.",
+     relatedIds:[], dateAdded:new Date(t-1000*60*60*24*80).toISOString()},
+    {id:uid(), title:"Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks", authors:"Lewis et al.", year:2020,
+     venue:"NeurIPS", doi:"10.48550/arXiv.2005.11401", arxivId:"2005.11401", url:"https://arxiv.org/abs/2005.11401",
+     abstract:"Combines parametric and non-parametric memory for language generation (RAG).",
+     tags:["nlp","retrieval","rag"], status:"reading", priority:4, rating:0,
+     citations:6200, citationsUpdated:nowIso(), notes:"", relatedIds:[], dateAdded:new Date(t-1000*60*60*24*5).toISOString()},
+    {id:uid(), title:"LoRA: Low-Rank Adaptation of Large Language Models", authors:"Hu et al.", year:2021,
+     venue:"ICLR", doi:"10.48550/arXiv.2106.09685", arxivId:"2106.09685", url:"https://arxiv.org/abs/2106.09685",
+     abstract:"Freezes pretrained weights and injects trainable low-rank matrices for efficient fine-tuning.",
+     tags:["fine-tuning","efficiency","nlp"], status:"toread", priority:3, rating:0,
+     citations:8500, citationsUpdated:nowIso(), notes:"", relatedIds:[], dateAdded:new Date(t-1000*60*60*24*2).toISOString()},
+    {id:uid(), title:"A Survey on Graph Neural Networks", authors:"Wu et al.", year:2020,
+     venue:"IEEE TNNLS", doi:"10.1109/TNNLS.2020.2978386", arxivId:"", url:"",
+     abstract:"Comprehensive survey of graph neural network methods and applications.",
+     tags:["graphs","survey","deep-learning"], status:"toread", priority:2, rating:0,
+     citations:4100, citationsUpdated:nowIso(), notes:"", relatedIds:[], dateAdded:new Date(t-1000*60*60*24*1).toISOString()}
+  ];
+}
+function sampleNotes(){
+  const t = Date.now();
+  return [
+    {id:uid(), title:"Self-attention", tags:["concept"],
+     content:"A mechanism where each token attends to every other token in a sequence, weighting them by relevance.\n\nUsed in [[Attention Is All You Need]] as the core building block, replacing recurrence entirely.\n\nComplexity is $O(n^2 d)$ for sequence length $n$ and dimension $d$ — the main scaling bottleneck motivating later work like [[Efficient attention]].",
+     dateCreated:new Date(t-1000*60*60*24*35).toISOString(), dateUpdated:new Date(t-1000*60*60*24*35).toISOString(), stub:false},
+    {id:uid(), title:"Efficient attention", tags:["concept","efficiency"],
+     content:"Umbrella term for methods that reduce the $O(n^2)$ cost of [[Self-attention]] — sparse patterns, linear attention, low-rank approximations.\n\nRelevant to [[LoRA: Low-Rank Adaptation of Large Language Models]] in spirit (low-rank ideas), though LoRA targets fine-tuning cost, not attention itself.",
+     dateCreated:new Date(t-1000*60*60*24*10).toISOString(), dateUpdated:new Date(t-1000*60*60*24*10).toISOString(), stub:false}
+  ];
+}
+
+/* ------------------------------ WIKILINKS ------------------------------ */
+// Every "node" in the graph — a paper or a standalone note — is addressable by its title.
+// Writing [[Some Title]] anywhere in a paper's notes or a standalone note's content creates
+// a link. If the title doesn't match anything yet, a lightweight stub note is auto-created
+// (like Obsidian) so the link resolves to a real, clickable node.
+function allLinkTargets(){
+  return [
+    ...papers.map(p=>({id:p.id, title:p.title, kind:'paper'})),
+    ...notes.map(n=>({id:n.id, title:n.title, kind:'note'}))
+  ];
+}
+function findTargetByTitle(title){
+  const norm = (title||'').trim().toLowerCase();
+  if(!norm) return null;
+  return allLinkTargets().find(t=>(t.title||'').trim().toLowerCase()===norm) || null;
+}
+function extractWikilinkTitles(text){
+  const out = [];
+  const re = /\[\[([^\[\]]+)\]\]/g;
+  let m;
+  while((m = re.exec(text||''))){ out.push(m[1].trim()); }
+  return out;
+}
+// Scans a note's content, ensures every [[Title]] it contains resolves to a real node
+// (creating an empty stub standalone note if needed), and returns {id,kind} for each link.
+function resolveAndStubLinks(text, ownerId){
+  const titles = extractWikilinkTitles(text);
+  const resolved = [];
+  let created = false;
+  titles.forEach(title=>{
+    if(!title) return;
+    let target = findTargetByTitle(title);
+    if(!target){
+      const stub = {id:uid(), title, tags:[], content:'', dateCreated:nowIso(), dateUpdated:nowIso(), stub:true};
+      notes.push(stub);
+      target = {id:stub.id, title:stub.title, kind:'note'};
+      created = true;
+    }
+    if(target.id !== ownerId) resolved.push(target);
+  });
+  if(created) saveNotes();
+  return resolved;
+}
+// All nodes that link TO a given paper/note id (computed fresh from current content).
+function backlinksFor(id){
+  const results = [];
+  const selfNode = {id, title:getTitleOf(id)};
+  if(!selfNode.title) return results;
+  const selfNorm = selfNode.title.trim().toLowerCase();
+  papers.forEach(p=>{
+    if(p.id===id) return;
+    if(extractWikilinkTitles(p.notes).some(t=>t.trim().toLowerCase()===selfNorm)) results.push({id:p.id, title:p.title, kind:'paper'});
+  });
+  notes.forEach(n=>{
+    if(n.id===id) return;
+    if(extractWikilinkTitles(n.content).some(t=>t.trim().toLowerCase()===selfNorm)) results.push({id:n.id, title:n.title, kind:'note'});
+  });
+  return results;
+}
+function getTitleOf(id){
+  const p = papers.find(x=>x.id===id); if(p) return p.title;
+  const n = notes.find(x=>x.id===id); if(n) return n.title;
+  return '';
+}
+function deleteOrphanStubs(){
+  // remove empty auto-created stubs that ended up with zero backlinks and were never filled in
+  notes = notes.filter(n=>{
+    if(!n.stub || (n.content||'').trim()) return true;
+    return backlinksFor(n.id).length > 0;
+  });
+}
+
+/* ------------------------------ MARKDOWN + LaTeX RENDERING ------------------------------ */
+// Renders markdown with support for $inline$ and $$display$$ math (KaTeX) and [[wikilinks]]
+// (turned into clickable chips that jump to the linked paper/note, auto-creating a stub note
+// for links that don't resolve to anything yet — same behavior as Obsidian).
+function renderRichText(src){
+  src = src || '';
+  const mathBlocks = [];
+  const stash = (display, expr) => { mathBlocks.push({display, expr}); return `@@MATH${mathBlocks.length-1}@@`; };
+  // Accepts $$..$$ and \[..\] for display math, $..$ and \(..\) for inline — whichever
+  // style you're used to. Display forms are extracted first so a lone "$$" can't be
+  // mistaken for two separate inline "$" pairs.
+  let work = src
+    .replace(/\$\$([\s\S]+?)\$\$/g, (m, expr)=> stash(true, expr))
+    .replace(/\\\[([\s\S]+?)\\\]/g, (m, expr)=> stash(true, expr))
+    .replace(/\\\(([\s\S]+?)\\\)/g, (m, expr)=> stash(false, expr))
+    .replace(/\$([^\$\n]+?)\$/g, (m, expr)=> stash(false, expr));
+  // protect wikilinks from marked's own escaping/formatting of [ ] and _ inside titles
+  const linkBlocks = [];
+  work = work.replace(/\[\[([^\[\]]+)\]\]/g, (m, title)=>{ linkBlocks.push(title.trim()); return `@@LINK${linkBlocks.length-1}@@`; });
+
+  let html;
+  try{ html = (typeof marked !== 'undefined') ? marked.parse(work) : escapeHtml(work).replace(/\n/g,'<br>'); }
+  catch(e){ html = escapeHtml(work); }
+
+  html = html.replace(/@@MATH(\d+)@@/g, (m, idx)=>{
+    const {display, expr} = mathBlocks[Number(idx)];
+    try{
+      if(typeof katex === 'undefined') return escapeHtml(display?`$$${expr}$$`:`$${expr}$`);
+      return katex.renderToString(expr, {displayMode:display, throwOnError:false});
+    }catch(e){ return `<span style="color:var(--danger)">[math error: ${escapeHtml(expr)}]</span>`; }
+  });
+  html = html.replace(/@@LINK(\d+)@@/g, (m, idx)=>{
+    const title = linkBlocks[Number(idx)];
+    const target = findTargetByTitle(title);
+    const stubClass = target ? '' : ' stub';
+    const idAttr = target ? target.id : '';
+    return `<a class="wikilink-chip${stubClass}" data-goto="${escapeHtml(idAttr)}" data-title="${escapeHtml(title)}">${target?'':'✦ '}${escapeHtml(title)}</a>`;
+  });
+  return html;
+}
+// Wires a textarea to a live-updating preview pane right next to it — no separate
+// "preview" button to remember to click, so math and links show up as you type.
+function wireLiveNotesPreview(textareaEl, previewEl, ownerId){
+  const update = ()=>{
+    previewEl.innerHTML = renderRichText(textareaEl.value||'');
+    wireWikilinkClicks(previewEl, ownerId, ()=>textareaEl.value);
+  };
+  update();
+  textareaEl.addEventListener('input', debounce(update, 200));
+}
+// Wires up clicks on any .wikilink-chip inside `container` (creating the stub note on first click if needed).
+function wireWikilinkClicks(container, ownerId, ownerText){
+  container.querySelectorAll('.wikilink-chip').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      let id = el.getAttribute('data-goto');
+      if(!id){
+        // resolve/create on demand, then re-open so the link becomes live
+        resolveAndStubLinks(ownerText ? ownerText() : '', ownerId);
+        const target = findTargetByTitle(el.getAttribute('data-title'));
+        id = target && target.id;
+      }
+      if(!id) return;
+      const isNote = notes.some(n=>n.id===id);
+      closeModal();
+      if(isNote) openNoteEditor(id); else openDetail(id);
+    });
+  });
+}
+
+/* ------------------------------ ACTIVITY / STREAK ------------------------------ */
+// Local-calendar-day string (NOT toISOString, which is UTC and misattributes evening
+// activity to the wrong day for anyone west of UTC — e.g. an 8pm save in Toronto/EST
+// would land on "tomorrow" if we used UTC).
+function todayStr(d){
+  d = d || new Date();
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+// Parses a "YYYY-MM-DD" string as a LOCAL date (new Date("YYYY-MM-DD") parses as UTC
+// midnight, which shifts to the previous calendar day in any timezone behind UTC) —
+// every date-string comparison in the streak logic must go through this, not `new Date(s)`.
+function parseLocalDate(s){ const [y,m,day] = s.split('-').map(Number); return new Date(y, m-1, day); }
+function hasActivity(dateStr){ return !!activity[dateStr]; }
+function recordActivity(){
+  const t = todayStr();
+  activity[t] = (activity[t]||0) + 1;
+  saveActivity();
+  renderStreakButton();
+}
+function currentStreak(){
+  let streak = 0;
+  let d = new Date();
+  // if nothing logged today yet, streak counts backward starting from yesterday
+  if(!hasActivity(todayStr(d))) d.setDate(d.getDate()-1);
+  while(hasActivity(todayStr(d))){ streak++; d.setDate(d.getDate()-1); }
+  return streak;
+}
+function longestStreak(){
+  const dateStrs = Object.keys(activity).filter(k=>activity[k]>0);
+  if(!dateStrs.length) return 0;
+  const set = new Set(dateStrs);
+  let best = 0;
+  set.forEach(dateStr=>{
+    const prev = parseLocalDate(dateStr); prev.setDate(prev.getDate()-1);
+    if(!set.has(todayStr(prev))){
+      let run = 1, cur = parseLocalDate(dateStr);
+      while(true){ cur.setDate(cur.getDate()+1); if(set.has(todayStr(cur))) run++; else break; }
+      if(run>best) best = run;
+    }
+  });
+  return best;
+}
+function daysSinceLastActivity(){
+  const dateStrs = Object.keys(activity).filter(k=>activity[k]>0).sort();
+  if(!dateStrs.length) return Infinity;
+  const last = parseLocalDate(dateStrs[dateStrs.length-1]);
+  const diffMs = parseLocalDate(todayStr()) - last;
+  return Math.round(diffMs / 86400000);
+}
+
+/* ------------------------------ TOASTS ------------------------------ */
+function toast(msg, kind){
+  const stack = document.getElementById('toastStack');
+  const el = document.createElement('div');
+  el.className = 'toast' + (kind ? ' '+kind : '');
+  el.textContent = msg;
+  stack.appendChild(el);
+  setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(),300); }, 3400);
+}
+
+/* ------------------------------ SCORING ------------------------------ */
+function priorityScore(p){
+  const w = settings.weights;
+  const maxCite = Math.max(10, ...papers.map(x=>x.citations||0));
+  const citeScore = Math.log10((p.citations||0)+1) / Math.log10(maxCite+10);
+  const years = papers.map(x=>x.year).filter(Boolean);
+  const minY = Math.min(...years, p.year||new Date().getFullYear());
+  const maxY = Math.max(...years, p.year||new Date().getFullYear());
+  const recencyScore = maxY>minY ? ((p.year||minY)-minY)/(maxY-minY) : 0.5;
+  const manualScore = (p.priority||0)/4;
+  const interest = (settings.interestTags||[]).map(t=>t.toLowerCase());
+  const tagScore = interest.length ? (p.tags||[]).filter(t=>interest.includes(t.toLowerCase())).length / interest.length : 0;
+  const wsum = (w.citation+w.recency+w.manual+w.tag) || 1;
+  const raw = (citeScore*w.citation + recencyScore*w.recency + manualScore*w.manual + Math.min(1,tagScore)*w.tag) / wsum;
+  return Math.round(clamp(raw,0,1)*100);
+}
+
+/* ------------------------------ FILTER/SORT ------------------------------ */
+function visiblePapers(){
+  let list = papers.slice();
+  if(searchQuery){
+    const q = searchQuery.toLowerCase();
+    list = list.filter(p =>
+      (p.title||"").toLowerCase().includes(q) ||
+      (p.authors||"").toLowerCase().includes(q) ||
+      (p.venue||"").toLowerCase().includes(q) ||
+      (p.tags||[]).some(t=>t.toLowerCase().includes(q))
+    );
+  }
+  if(activeTagFilter){
+    list = list.filter(p => (p.tags||[]).includes(activeTagFilter));
+  }
+  const scoreCache = new Map();
+  const scoreOf = p => { if(!scoreCache.has(p.id)) scoreCache.set(p.id, priorityScore(p)); return scoreCache.get(p.id); };
+  switch(sortMode){
+    case "smart": list.sort((a,b)=> scoreOf(b)-scoreOf(a)); break;
+    case "recent": list.sort((a,b)=> new Date(b.dateAdded)-new Date(a.dateAdded)); break;
+    case "year": list.sort((a,b)=> (b.year||0)-(a.year||0)); break;
+    case "citations": list.sort((a,b)=> (b.citations||0)-(a.citations||0)); break;
+    case "title": list.sort((a,b)=> (a.title||"").localeCompare(b.title||"")); break;
+  }
+  return list;
+}
+function allTags(){
+  const s = new Set();
+  papers.forEach(p=>(p.tags||[]).forEach(t=>s.add(t)));
+  return Array.from(s).sort();
+}
+
+/* ------------------------------ RENDER: SHARED ------------------------------ */
+function render(){
+  document.getElementById('resultCount').textContent = visiblePapers().length + ' paper' + (visiblePapers().length===1?'':'s');
+  renderTagChips();
+  if(currentView==='board') renderBoard();
+  else if(currentView==='graph') renderGraph();
+  else if(currentView==='notesgraph') renderNotesGraph();
+  else renderList();
+}
+function renderTagChips(){
+  const wrap = document.getElementById('tagChips');
+  const tags = allTags().slice(0, 18);
+  wrap.innerHTML = tags.map(t=>
+    `<span class="tag-chip ${t===activeTagFilter?'active':''}" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</span>`
+  ).join('');
+  wrap.querySelectorAll('.tag-chip').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const t = el.getAttribute('data-tag');
+      activeTagFilter = (activeTagFilter===t) ? null : t;
+      render();
+    });
+  });
+}
+
+/* ------------------------------ RENDER: BOARD ------------------------------ */
+function renderBoard(){
+  const root = document.getElementById('boardView');
+  const list = visiblePapers();
+  root.innerHTML = settings.columns.map(col=>{
+    const items = list.filter(p => p.status===col.id);
+    return `
+    <div class="column" data-col="${col.id}">
+      <div class="column-head">
+        <span class="column-dot" style="background:${col.color}"></span>
+        <span>${escapeHtml(col.label)}</span>
+        <span class="column-count">${items.length}</span>
+      </div>
+      <div class="column-body" data-col="${col.id}">
+        ${items.map(cardHtml).join('')}
+      </div>
+    </div>`;
+  }).join('') + `<button class="add-col-btn" id="btnAddColumn">＋ Add column</button>`;
+
+  root.querySelectorAll('.card').forEach(el=>{
+    el.addEventListener('click', ()=> openDetail(el.getAttribute('data-id')));
+  });
+  root.querySelectorAll('.column-body').forEach(colEl=>{
+    new Sortable(colEl, {
+      group:'board', animation:150, ghostClass:'sortable-ghost',
+      onEnd: (evt)=>{
+        const id = evt.item.getAttribute('data-id');
+        const newStatus = evt.to.getAttribute('data-col');
+        const p = papers.find(x=>x.id===id);
+        if(p && p.status!==newStatus){ p.status = newStatus; savePapers(); toast('Moved to "'+(settings.columns.find(c=>c.id===newStatus)||{}).label+'"'); }
+        render();
+      }
+    });
+  });
+  const addColBtn = document.getElementById('btnAddColumn');
+  if(addColBtn) addColBtn.addEventListener('click', addColumnPrompt);
+}
+function priorityLabel(n){ return {0:'None',1:'Low',2:'Medium',3:'High',4:'Critical'}[n||0]; }
+function cardHtml(p){
+  const score = priorityScore(p);
+  return `
+  <div class="card" draggable="true" data-id="${p.id}">
+    <div class="card-title">${escapeHtml(p.title||'Untitled')}</div>
+    <div class="card-meta">${escapeHtml(p.authors||'')||'&nbsp;'} ${p.year?'· '+p.year:''}</div>
+    <div class="card-row">
+      ${p.priority?`<span class="badge badge-priority-${p.priority}">${priorityLabel(p.priority)}</span>`:''}
+      <span class="badge badge-score" title="Smart priority score">★ ${score}</span>
+      ${p.citations?`<span class="badge badge-cite">📈 ${formatNum(p.citations)}</span>`:''}
+    </div>
+    ${(p.tags&&p.tags.length)?`<div class="card-row">${p.tags.slice(0,4).map(t=>`<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}</div>`:''}
+  </div>`;
+}
+function formatNum(n){
+  if(n>=1000000) return (n/1000000).toFixed(1)+'M';
+  if(n>=1000) return (n/1000).toFixed(1)+'k';
+  return String(n);
+}
+function addColumnPrompt(){
+  const label = prompt('New column name (e.g. "Someday", "Writing up"):');
+  if(!label) return;
+  const id = 'c_' + label.toLowerCase().replace(/[^a-z0-9]+/g,'_').slice(0,20) + '_' + Math.random().toString(36).slice(2,5);
+  settings.columns.push({id, label, color:'var(--accent)'});
+  saveSettings();
+  render();
+}
+
+/* ------------------------------ RENDER: LIST ------------------------------ */
+let listSortKey = null, listSortDir = 1;
+function renderList(){
+  const root = document.getElementById('listView');
+  let list = visiblePapers();
+  if(listSortKey){
+    list = list.slice().sort((a,b)=>{
+      let av, bv;
+      if(listSortKey==='score'){ av=priorityScore(a); bv=priorityScore(b); }
+      else { av=a[listSortKey]; bv=b[listSortKey]; }
+      if(typeof av==='string') return listSortDir*String(av||'').localeCompare(String(bv||''));
+      return listSortDir*((av||0)-(bv||0));
+    });
+  }
+  const cols = settings.columns;
+  root.innerHTML = `
+  <table class="plist">
+    <thead><tr>
+      <th data-k="title">Title</th><th data-k="authors">Authors</th><th data-k="year">Year</th>
+      <th data-k="status">Status</th><th>Tags</th><th data-k="citations">Citations</th>
+      <th data-k="priority">Importance</th><th data-k="score">Score</th>
+    </tr></thead>
+    <tbody>
+      ${list.map(p=>{
+        const col = cols.find(c=>c.id===p.status) || {label:p.status, color:'var(--text-faint)'};
+        const score = priorityScore(p);
+        return `<tr data-id="${p.id}">
+          <td><strong>${escapeHtml(p.title||'Untitled')}</strong></td>
+          <td>${escapeHtml(p.authors||'')}</td>
+          <td>${p.year||''}</td>
+          <td><span class="status-pill" style="background:${col.color}">${escapeHtml(col.label)}</span></td>
+          <td>${(p.tags||[]).slice(0,3).map(t=>`<span class="tag-pill">${escapeHtml(t)}</span>`).join(' ')}</td>
+          <td>${p.citations?formatNum(p.citations):'—'}</td>
+          <td>${p.priority?priorityLabel(p.priority):'—'}</td>
+          <td><span class="score-bar-wrap"><span class="score-bar" style="width:${score}%"></span></span>${score}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+  if(!list.length) root.innerHTML = emptyStateHtml('No papers match your filters yet.');
+  root.querySelectorAll('tbody tr').forEach(tr=> tr.addEventListener('click', ()=>openDetail(tr.getAttribute('data-id'))));
+  root.querySelectorAll('th[data-k]').forEach(th=>{
+    th.addEventListener('click', ()=>{
+      const k = th.getAttribute('data-k');
+      if(listSortKey===k) listSortDir *= -1; else { listSortKey=k; listSortDir=1; }
+      renderList();
+    });
+  });
+}
+function emptyStateHtml(msg){
+  return `<div class="empty-state"><div class="big">📭</div><div>${escapeHtml(msg)}</div></div>`;
+}
+
+/* ------------------------------ RENDER: GRAPH ------------------------------ */
+// Two graphs share this data layer: the Papers graph (papers are the primary citizens) and
+// the Notes graph (notes are the primary citizens, Obsidian-style — sized by how many things
+// link to them). Whichever isn't primary in a given view still appears, small and muted, when
+// something links to it, so you never lose the paper<->note connection, just the visual clutter.
+let graphSim = null;
+let showTagEdges = false; // shared-tag ties are secondary noise by default — [[wikilinks]] are the real signal
+function buildGraphUniverse(){
+  const paperList = visiblePapers();
+  deleteOrphanStubs();
+  const noteList = notes.slice();
+  const allNodes = [
+    ...paperList.map(p=>({id:p.id, kind:'paper', p})),
+    ...noteList.map(n=>({id:n.id, kind:'note', p:n}))
+  ];
+  const idSet = new Set(allNodes.map(n=>n.id));
+  const links = [];
+  const seenPairs = new Set();
+  function addWikilinkEdges(ownerId, text){
+    extractWikilinkTitles(text).forEach(title=>{
+      const target = findTargetByTitle(title);
+      if(target && idSet.has(target.id) && target.id!==ownerId){
+        const key = [ownerId, target.id].sort().join('|');
+        if(!seenPairs.has(key)){ seenPairs.add(key); links.push({source:ownerId, target:target.id, kind:'wikilink'}); }
+      }
+    });
+  }
+  paperList.forEach(p=> addWikilinkEdges(p.id, p.notes));
+  noteList.forEach(n=> addWikilinkEdges(n.id, n.content));
+  // legacy manual relatedIds from before wikilinks existed, still honored
+  paperList.forEach(p=>{
+    (p.relatedIds||[]).forEach(rid=>{
+      if(idSet.has(rid)){
+        const key=[p.id,rid].sort().join('|');
+        if(!seenPairs.has(key)){ seenPairs.add(key); links.push({source:p.id, target:rid, kind:'wikilink'}); }
+      }
+    });
+  });
+  // faint shared-tag ties between papers — off by default (toggle in the toolbar) since
+  // with real reading lists these can quickly outnumber and drown out the [[wikilinks]]
+  // you actually wrote on purpose
+  if(showTagEdges){
+    for(let i=0;i<paperList.length;i++){
+      for(let j=i+1;j<paperList.length;j++){
+        const a=paperList[i], b=paperList[j];
+        const shared = (a.tags||[]).filter(t=>(b.tags||[]).includes(t));
+        if(shared.length>0){
+          const key=[a.id,b.id].sort().join('|');
+          if(!seenPairs.has(key)){ seenPairs.add(key); links.push({source:a.id, target:b.id, kind:'tag', weight:shared.length}); }
+        }
+      }
+    }
+  }
+  return {paperList, noteList, allNodes, links};
+}
+
+// mode 'papers': papers are primary (sized by citations+links, colored by board status);
+//                linked notes show up small and muted.
+// mode 'notes':  notes are primary (sized purely by how many things link to them, like
+//                Obsidian); linked papers show up small and muted for context.
+function renderForceGraph(rootId, mode){
+  const root = document.getElementById(rootId);
+  root.innerHTML = '';
+  const {paperList, noteList, allNodes, links} = buildGraphUniverse();
+
+  if(mode==='notes' && !noteList.length){
+    root.innerHTML = emptyStateHtml('No notes yet — click "🧠 New note" below, or write [[Some Title]] inside any paper\'s notes to spin up a linked note automatically.');
+    return;
+  }
+  if(mode==='papers' && !paperList.length){
+    root.innerHTML = emptyStateHtml('Nothing to visualize yet — add a paper first.');
+    return;
+  }
+
+  const primaryKind = mode==='notes' ? 'note' : 'paper';
+  const primaryIds = new Set(allNodes.filter(n=>n.kind===primaryKind).map(n=>n.id));
+  const secondaryIds = new Set();
+  links.forEach(l=>{
+    const sIn = primaryIds.has(l.source), tIn = primaryIds.has(l.target);
+    if(sIn && !tIn) secondaryIds.add(l.target);
+    if(tIn && !sIn) secondaryIds.add(l.source);
+  });
+  const includedIds = new Set([...primaryIds, ...secondaryIds]);
+  const nodes = allNodes.filter(n=>includedIds.has(n.id)).map(n=>Object.assign({secondary:!primaryIds.has(n.id)}, n));
+  const nodeIdSet = new Set(nodes.map(n=>n.id));
+  const graphLinks = links.filter(l=> nodeIdSet.has(l.source) && nodeIdSet.has(l.target));
+
+  // snapshot plain id pairs BEFORE handing links to d3 — real d3 mutates link.source/.target
+  // in place into node object references, which would make an id-based lookup unreliable
+  const linkPairs = graphLinks.map(l=>({a:l.source, b:l.target, kind:l.kind}));
+  const neighborMap = new Map();
+  nodes.forEach(n=> neighborMap.set(n.id, new Set([n.id])));
+  linkPairs.forEach(({a,b})=>{ neighborMap.get(a) && neighborMap.get(a).add(b); neighborMap.get(b) && neighborMap.get(b).add(a); });
+  const degree = new Map(nodes.map(n=>[n.id, (neighborMap.get(n.id)||new Set()).size - 1]));
+
+  const width = root.clientWidth || 800, height = root.clientHeight || 600;
+  const svg = d3.select(root).append('svg').attr('viewBox',[0,0,width,height]).attr('class','obsidian-svg');
+  const g = svg.append('g');
+  const zoomBehavior = d3.zoom().scaleExtent([0.15,5]).on('zoom', (ev)=> g.attr('transform', ev.transform));
+  svg.call(zoomBehavior);
+
+  const maxCite = Math.max(10, ...paperList.map(p=>p.citations||0));
+  function nodeRadius(d){
+    const deg = degree.get(d.id) || 0;
+    let r = (d.secondary ? 4 : 6) + Math.sqrt(deg) * 3.4;
+    if(d.kind==='paper' && !d.secondary){ r += Math.min(7, Math.log10((d.p.citations||0)+1) * 1.9); }
+    return Math.min(r, d.secondary ? 12 : 32);
+  }
+  function nodeColor(d){
+    if(d.kind==='note') return d.secondary ? 'var(--graph-node-secondary)' : (d.p.stub ? 'var(--graph-node-stub)' : 'var(--graph-node-note)');
+    return d.secondary ? 'var(--graph-node-secondary)' : ((settings.columns.find(c=>c.id===d.p.status)||{}).color || 'var(--graph-node-paper)');
+  }
+  function baseClass(d){
+    return 'pnode ' + (d.kind==='note'?'kind-note':'kind-paper') + (d.secondary?' secondary':'') + ((degree.get(d.id)||0)>=4 ? ' hub':'');
+  }
+
+  const link = g.append('g').selectAll('line').data(graphLinks).join('line')
+    .attr('class', (d,i)=> 'link-line ' + linkPairs[i].kind)
+    .attr('stroke-width', d=> d.kind==='wikilink' ? 1.6 : Math.min(3, 0.6+(d.weight||1)*0.5));
+
+  const node = g.append('g').selectAll('g').data(nodes).join('g')
+    .attr('class', baseClass)
+    .call(d3.drag()
+      .on('start', (ev,d)=>{ if(!ev.active) graphSim.alphaTarget(0.25).restart(); d.fx=d.x; d.fy=d.y; })
+      .on('drag', (ev,d)=>{ d.fx=ev.x; d.fy=ev.y; })
+      .on('end', (ev,d)=>{ if(!ev.active) graphSim.alphaTarget(0); d.fx=null; d.fy=null; }));
+
+  node.filter(d=>d.kind==='paper').append('circle')
+    .attr('r', d=>nodeRadius(d))
+    .attr('fill', d=>nodeColor(d))
+    .style('cursor','pointer')
+    .on('click', (ev,d)=> openDetail(d.id));
+
+  node.filter(d=>d.kind==='note').append('rect')
+    .attr('class', d=> 'note-shape' + (d.p.stub?' stub':''))
+    .attr('width', d=>nodeRadius(d)*1.5).attr('height', d=>nodeRadius(d)*1.5)
+    .attr('x', d=>-nodeRadius(d)*0.75).attr('y', d=>-nodeRadius(d)*0.75)
+    .attr('transform','rotate(45)')
+    .attr('fill', d=>nodeColor(d))
+    .style('cursor','pointer')
+    .on('click', (ev,d)=> openNoteEditor(d.id));
+
+  node.append('text').attr('class', d=> 'node-label' + (d.secondary?' secondary-label':''))
+    .attr('text-anchor','middle').attr('dy', d=> -(nodeRadius(d))-6)
+    .text(d=> (d.p.title||'').length>30 ? d.p.title.slice(0,28)+'…' : d.p.title);
+
+  node.append('title').text(d=> d.kind==='note' ? ('Note: '+d.p.title) : (d.p.title + (d.p.authors? ' — '+d.p.authors:'')));
+
+  // hover-to-highlight-neighborhood: dim everything except the hovered node, its direct
+  // neighbors, and the edges between them — this is what makes a busy graph feel navigable
+  function applyHighlight(hoverId){
+    const neigh = hoverId ? neighborMap.get(hoverId) : null;
+    node.attr('class', d=> baseClass(d) + (neigh ? (neigh.has(d.id) ? ' hl' : ' dim') : ''));
+    link.attr('class', (d,i)=>{
+      const pr = linkPairs[i];
+      let cls = 'link-line ' + pr.kind;
+      if(neigh) cls += (neigh.has(pr.a) && neigh.has(pr.b)) ? ' hl' : ' dim';
+      return cls;
+    });
+  }
+  node.on('mouseenter', (ev,d)=> applyHighlight(d.id)).on('mouseleave', ()=> applyHighlight(null));
+
+  graphSim = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(graphLinks).id(d=>d.id).distance(l=> l.kind==='wikilink'?95:140).strength(l=> l.kind==='wikilink'?0.7:0.15))
+    .force('charge', d3.forceManyBody().strength(d=> d.secondary?-180:-460))
+    .force('center', d3.forceCenter(width/2, height/2))
+    .force('collide', d3.forceCollide().radius(d=>nodeRadius(d)+24))
+    .on('tick', ()=>{
+      link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+      node.attr('transform', d=>`translate(${d.x},${d.y})`);
+    });
+  // let it settle a bit longer than d3's default before coasting to a stop, so a
+  // freshly-opened graph doesn't look like it's still "falling into place"
+  graphSim.alpha(1).alphaDecay(1 - Math.pow(0.001, 1/300));
+
+  const toolbar = document.createElement('div');
+  toolbar.className='graph-toolbar';
+  toolbar.innerHTML = `
+    <button class="btn btn-sm" id="btnNewNote">🧠 New note</button>
+    ${mode==='papers' ? `<label class="tag-toggle"><input type="checkbox" id="chkTagEdges" ${showTagEdges?'checked':''} style="margin:0;"/> Show shared-tag ties</label>` : ''}
+  `;
+  root.appendChild(toolbar);
+  document.getElementById('btnNewNote').addEventListener('click', openNewNoteModal);
+  const chkTag = document.getElementById('chkTagEdges');
+  if(chkTag) chkTag.addEventListener('change', (e)=>{ showTagEdges = e.target.checked; render(); });
+
+  const zoomControls = document.createElement('div');
+  zoomControls.className='graph-zoom-controls';
+  zoomControls.innerHTML = `<button id="gzIn" title="Zoom in">＋</button><button id="gzOut" title="Zoom out">－</button><button id="gzReset" title="Reset view">⟲</button>`;
+  root.appendChild(zoomControls);
+  document.getElementById('gzIn').addEventListener('click', ()=> svg.transition().duration(200).call(zoomBehavior.scaleBy, 1.4));
+  document.getElementById('gzOut').addEventListener('click', ()=> svg.transition().duration(200).call(zoomBehavior.scaleBy, 1/1.4));
+  document.getElementById('gzReset').addEventListener('click', ()=> svg.transition().duration(250).call(zoomBehavior.transform, d3.zoomIdentity));
+
+  const legend = document.createElement('div');
+  legend.className='graph-legend';
+  legend.innerHTML = mode==='papers'
+    ? settings.columns.map(c=>`<div><span class="legend-dot" style="background:${c.color}"></span>${escapeHtml(c.label)}</div>`).join('')
+      + `<div><span class="legend-dot" style="background:var(--graph-node-secondary); transform:rotate(45deg); border-radius:2px;"></span>Linked note</div>`
+      + `<div style="margin-top:6px; border-top:1px solid rgba(255,255,255,.12); padding-top:6px;"><span style="color:var(--graph-edge-hl)">━</span> [[wikilink]]${showTagEdges?' &nbsp; <span style="color:rgba(255,255,255,.35)">┅</span> shared tag':''}</div>`
+    : `<div><span class="legend-dot" style="background:var(--graph-node-note); transform:rotate(45deg); border-radius:2px;"></span>Note</div>`
+      + `<div><span class="legend-dot" style="background:var(--graph-node-secondary);"></span>Linked paper</div>`
+      + `<div><span class="legend-dot" style="background:var(--graph-node-stub); transform:rotate(45deg); border-radius:2px; opacity:.6;"></span>Unwritten stub</div>`
+      + `<div style="margin-top:6px; border-top:1px solid rgba(255,255,255,.12); padding-top:6px;">Bigger note = more things link to it. Hover a node to trace its connections.</div>`;
+  root.appendChild(legend);
+
+  const hint = document.createElement('div');
+  hint.className='graph-hint';
+  hint.textContent = graphLinks.length
+    ? 'Drag to arrange · scroll or +/− to zoom · hover a node to trace its links · click to open.'
+    : (mode==='notes'
+        ? 'Nothing linked yet — open a note and write [[Title]] to connect it to another note or paper.'
+        : 'Nothing is linked yet — write [[Title]] inside any paper\'s notes to draw a connection here. New titles create a note automatically.');
+  root.appendChild(hint);
+}
+function renderGraph(){ renderForceGraph('graphView', 'papers'); }
+function renderNotesGraph(){ renderForceGraph('notesGraphView', 'notes'); }
+
+/* ------------------------------ NEW NOTE (small modal, not a native prompt) ------------------------------ */
+function openNewNoteModal(){
+  const html = `
+  <div class="modal modal-sm">
+    <div class="modal-head"><h2>🧠 New note</h2><button class="btn btn-icon btn-ghost" data-close>✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Title</label><input id="newNoteTitle" placeholder="e.g. Positional encoding" autofocus/></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn btn-primary" id="btnCreateNote">Create &amp; open</button>
+    </div>
+  </div>`;
+  showModal(html);
+  const input = document.getElementById('newNoteTitle');
+  input.focus();
+  function create(){
+    const title = input.value.trim();
+    if(!title){ toast('Give the note a title first','err'); return; }
+    const n = {id:uid(), title, tags:[], content:'', dateCreated:nowIso(), dateUpdated:nowIso(), stub:false};
+    notes.push(n); saveNotes();
+    closeModal();
+    openNoteEditor(n.id);
+  }
+  input.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); create(); }});
+  document.getElementById('btnCreateNote').addEventListener('click', create);
+}
+
+/* ------------------------------ DETAIL MODAL ------------------------------ */
+function openDetail(id){
+  const p = papers.find(x=>x.id===id);
+  if(!p) return;
+  const score = priorityScore(p);
+  const html = `
+  <div class="modal modal-lg">
+    <div class="modal-head">
+      <h2>${escapeHtml(p.title||'Untitled')}</h2>
+      <button class="btn btn-icon btn-ghost" data-close>✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="tabs">
+        <button data-tab="overview" class="active">Overview</button>
+        <button data-tab="notes">Notes</button>
+        <button data-tab="related">Connections${backlinksFor(p.id).length?` (${backlinksFor(p.id).length})`:''}</button>
+      </div>
+
+      <div class="tabpane active" data-pane="overview">
+        <div class="field-row">
+          <div class="field"><label>Title</label><input id="f_title" value="${escapeHtml(p.title||'')}"/></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Authors</label><input id="f_authors" value="${escapeHtml(p.authors||'')}"/></div>
+          <div class="field" style="max-width:110px;"><label>Year</label><input id="f_year" type="number" value="${p.year||''}"/></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Venue</label><input id="f_venue" value="${escapeHtml(p.venue||'')}"/></div>
+          <div class="field"><label>DOI</label><input id="f_doi" value="${escapeHtml(p.doi||'')}"/></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>URL</label><input id="f_url" value="${escapeHtml(p.url||'')}"/></div>
+          <div class="field"><label>arXiv ID</label><input id="f_arxiv" value="${escapeHtml(p.arxivId||'')}"/></div>
+        </div>
+        <div class="field"><label>Tags (comma separated)</label><input id="f_tags" value="${escapeHtml((p.tags||[]).join(', '))}"/></div>
+        <div class="field"><label>Abstract</label><textarea id="f_abstract" rows="3">${escapeHtml(p.abstract||'')}</textarea></div>
+
+        <div class="field-row">
+          <div class="field">
+            <label>Status</label>
+            <select id="f_status">${settings.columns.map(c=>`<option value="${c.id}" ${c.id===p.status?'selected':''}>${escapeHtml(c.label)}</option>`).join('')}</select>
+          </div>
+          <div class="field">
+            <label>Importance</label>
+            <select id="f_priority">
+              <option value="0" ${!p.priority?'selected':''}>None</option>
+              <option value="1" ${p.priority==1?'selected':''}>Low</option>
+              <option value="2" ${p.priority==2?'selected':''}>Medium</option>
+              <option value="3" ${p.priority==3?'selected':''}>High</option>
+              <option value="4" ${p.priority==4?'selected':''}>Critical</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Your rating</label>
+          <div class="stars" id="ratingStars">${[1,2,3,4,5].map(n=>`<button data-n="${n}" class="${(p.rating||0)>=n?'on':''}">★</button>`).join('')}</div>
+        </div>
+
+        <div class="detail-meta-grid">
+          <div class="stat-tile"><div class="num" id="statCitations">${p.citations?formatNum(p.citations):'—'}</div><div class="lbl">Citations</div></div>
+          <div class="stat-tile"><div class="num">${score}</div><div class="lbl">Smart score</div></div>
+        </div>
+        <button class="btn btn-sm" id="btnRefreshStats">🔄 Refresh citation stats</button>
+        <div class="field-hint" id="statsUpdatedHint">${p.citationsUpdated ? 'Last checked '+timeAgo(p.citationsUpdated) : 'Not checked yet'}</div>
+      </div>
+
+      <div class="tabpane" data-pane="notes">
+        <div class="notes-toolbar">
+          <button class="btn btn-sm" id="btnInsertLink">🔗 Insert link</button>
+        </div>
+        <div class="notes-hint">Use <code>[[Paper or Note Title]]</code> to connect this to anything — new titles create a note automatically. Math renders live: <code>$E=mc^2$</code> or <code>$$\\int_0^1 x^2\\,dx$$</code> (also accepts <code>\\(...\\)</code> / <code>\\[...\\]</code>).</div>
+        <div class="notes-editor-grid">
+          <div>
+            <div class="notes-pane-label">Write</div>
+            <textarea id="f_notes" rows="14" placeholder="Key ideas, quotes, critiques… [[Related Concept]], $\alpha_i$">${escapeHtml(p.notes||'')}</textarea>
+          </div>
+          <div>
+            <div class="notes-pane-label">Preview</div>
+            <div class="md-preview" id="notesPreview"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tabpane" data-pane="related">
+        <p class="field-hint" style="margin-bottom:10px;">Connections are automatic — anything that writes <code>[[${escapeHtml(p.title||'this title')}]]</code> in its notes shows up here. No manual linking needed.</p>
+        <div class="backlink-list" id="backlinkList">
+          ${backlinksFor(p.id).map(b=>`<div class="backlink-item" data-goto="${b.id}"><span class="kind-dot" style="background:${b.kind==='note'?'var(--text-faint)':'var(--accent)'}"></span>${b.kind==='note'?'🧠 ':'📄 '}${escapeHtml(b.title)}</div>`).join('') || '<p class="field-hint">Nothing links here yet.</p>'}
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-danger" id="btnDeletePaper">Delete</button>
+      <div class="spacer"></div>
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn btn-primary" id="btnSavePaper">Save changes</button>
+    </div>
+  </div>`;
+  showModal(html);
+
+  const modalRoot = document.getElementById('modalRoot');
+  modalRoot.querySelectorAll('.tabs button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      modalRoot.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));
+      modalRoot.querySelectorAll('.tabpane').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      modalRoot.querySelector(`.tabpane[data-pane="${btn.getAttribute('data-tab')}"]`).classList.add('active');
+    });
+  });
+  modalRoot.querySelectorAll('#ratingStars button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const n = Number(btn.getAttribute('data-n'));
+      p.rating = (p.rating===n) ? 0 : n;
+      modalRoot.querySelectorAll('#ratingStars button').forEach(b=> b.classList.toggle('on', Number(b.getAttribute('data-n'))<=p.rating));
+    });
+  });
+  wireLiveNotesPreview(document.getElementById('f_notes'), document.getElementById('notesPreview'), p.id);
+  document.getElementById('btnInsertLink').addEventListener('click', ()=> openLinkPicker(document.getElementById('f_notes'), p.id));
+  document.getElementById('btnRefreshStats').addEventListener('click', ()=> refreshCitations(p, true));
+  modalRoot.querySelectorAll('.backlink-item[data-goto]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const gid = el.getAttribute('data-goto');
+      closeModal();
+      if(notes.some(n=>n.id===gid)) openNoteEditor(gid); else openDetail(gid);
+    });
+  });
+  document.getElementById('btnDeletePaper').addEventListener('click', ()=>{
+    if(confirm('Delete "'+p.title+'"? This cannot be undone.')){
+      papers = papers.filter(x=>x.id!==id);
+      savePapers(); closeModal(); render();
+      toast('Paper deleted');
+    }
+  });
+  document.getElementById('btnSavePaper').addEventListener('click', ()=>{
+    p.title = document.getElementById('f_title').value.trim() || 'Untitled';
+    p.authors = document.getElementById('f_authors').value.trim();
+    p.year = Number(document.getElementById('f_year').value) || null;
+    p.venue = document.getElementById('f_venue').value.trim();
+    p.doi = document.getElementById('f_doi').value.trim();
+    p.url = document.getElementById('f_url').value.trim();
+    p.arxivId = document.getElementById('f_arxiv').value.trim();
+    p.tags = document.getElementById('f_tags').value.split(',').map(s=>s.trim()).filter(Boolean);
+    p.abstract = document.getElementById('f_abstract').value.trim();
+    p.status = document.getElementById('f_status').value;
+    p.priority = Number(document.getElementById('f_priority').value);
+    const newNotes = document.getElementById('f_notes').value;
+    const notesChanged = newNotes !== p.notes;
+    p.notes = newNotes;
+    if(notesChanged){ resolveAndStubLinks(p.notes, p.id); if(p.notes.trim()) recordActivity(); }
+    savePapers(); closeModal(); render();
+    toast('Saved');
+  });
+}
+
+/* ------------------------------ LINK PICKER (insert [[Title]] at cursor) ------------------------------ */
+function openLinkPicker(textareaEl, ownerId){
+  const targets = allLinkTargets().filter(t=>t.id!==ownerId);
+  const html = `
+  <div class="modal modal-sm">
+    <div class="modal-head"><h2>Insert a link</h2><button class="btn btn-icon btn-ghost" data-close>✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Search papers &amp; notes</label><input id="linkSearch" placeholder="Start typing a title…" autofocus/></div>
+      <div class="backlink-list" id="linkPickerList" style="max-height:280px; overflow-y:auto;"></div>
+      <p class="field-hint" style="margin-top:10px;">No match? Just type <code>[[Any New Title]]</code> directly in your notes — it'll create the note automatically when you save.</p>
+    </div>
+  </div>`;
+  showModal(html);
+  function renderOptions(q){
+    const list = document.getElementById('linkPickerList');
+    const filtered = q ? targets.filter(t=>t.title.toLowerCase().includes(q.toLowerCase())) : targets;
+    list.innerHTML = filtered.slice(0,30).map(t=>
+      `<div class="backlink-item" data-id="${t.id}" data-title="${escapeHtml(t.title)}"><span class="kind-dot" style="background:${t.kind==='note'?'var(--text-faint)':'var(--accent)'}"></span>${t.kind==='note'?'🧠 ':'📄 '}${escapeHtml(t.title)}</div>`
+    ).join('') || '<p class="field-hint">No matches.</p>';
+    list.querySelectorAll('.backlink-item').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const title = el.getAttribute('data-title');
+        insertAtCursor(textareaEl, `[[${title}]]`);
+        closeModal();
+      });
+    });
+  }
+  renderOptions('');
+  document.getElementById('linkSearch').addEventListener('input', (e)=> renderOptions(e.target.value));
+}
+function insertAtCursor(el, text){
+  const start = el.selectionStart ?? el.value.length, end = el.selectionEnd ?? el.value.length;
+  el.value = el.value.slice(0,start) + text + el.value.slice(end);
+  el.selectionStart = el.selectionEnd = start + text.length;
+  el.focus();
+}
+
+/* ------------------------------ STANDALONE NOTE EDITOR ------------------------------ */
+function openNoteEditor(id){
+  const n = notes.find(x=>x.id===id);
+  if(!n) return;
+  const html = `
+  <div class="modal modal-xl">
+    <div class="modal-head">
+      <span style="font-size:18px;">🧠</span>
+      <h2>${n.stub ? '(new) ' : ''}${escapeHtml(n.title||'Untitled note')}</h2>
+      ${n.dateUpdated ? `<span class="field-hint" style="margin:0 6px;">edited ${timeAgo(n.dateUpdated)}</span>` : ''}
+      <button class="btn btn-icon btn-ghost" data-close>✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-row" style="align-items:flex-end;">
+        <div class="field" style="flex:2;"><label>Title</label><input id="n_title" class="note-title-input" value="${escapeHtml(n.title||'')}" placeholder="Untitled note"/></div>
+        <div class="field" style="flex:1;"><label>Tags (comma separated)</label><input id="n_tags" value="${escapeHtml((n.tags||[]).join(', '))}"/></div>
+        <button class="btn btn-sm" id="btnInsertLink" style="margin-bottom:13px;">🔗 Insert link</button>
+      </div>
+      <div class="notes-hint">Use <code>[[Paper or Note Title]]</code> to connect this note to anything. Math renders live: <code>$E=mc^2$</code> or <code>$$\\int_0^1 x^2\\,dx$$</code> (also accepts <code>\\(...\\)</code> / <code>\\[...\\]</code>).</div>
+      <div class="notes-editor-grid">
+        <div>
+          <div class="notes-pane-label">Write</div>
+          <textarea id="n_content" placeholder="Write freely — link papers or other notes with [[Title]], and use $math$ where it helps.">${escapeHtml(n.content||'')}</textarea>
+        </div>
+        <div>
+          <div class="notes-pane-label">Preview</div>
+          <div class="md-preview" id="notesPreview"></div>
+        </div>
+      </div>
+      <div class="field" style="margin-top:14px; margin-bottom:0;">
+        <label>Backlinks${backlinksFor(n.id).length?` (${backlinksFor(n.id).length})`:''}</label>
+        <div class="backlink-list" id="backlinkList">
+          ${backlinksFor(n.id).map(b=>`<div class="backlink-item" data-goto="${b.id}"><span class="kind-dot" style="background:${b.kind==='note'?'var(--text-faint)':'var(--accent)'}"></span>${b.kind==='note'?'🧠 ':'📄 '}${escapeHtml(b.title)}</div>`).join('') || '<p class="field-hint">Nothing links here yet.</p>'}
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-danger" id="btnDeleteNote">Delete</button>
+      <div class="spacer"></div>
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn btn-primary" id="btnSaveNote">Save note</button>
+    </div>
+  </div>`;
+  showModal(html);
+  const modalRoot = document.getElementById('modalRoot');
+  const contentEl = document.getElementById('n_content');
+  wireLiveNotesPreview(contentEl, document.getElementById('notesPreview'), n.id);
+  document.getElementById('btnInsertLink').addEventListener('click', ()=> openLinkPicker(contentEl, n.id));
+  modalRoot.querySelectorAll('.backlink-item[data-goto]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const gid = el.getAttribute('data-goto');
+      closeModal();
+      if(notes.some(x=>x.id===gid)) openNoteEditor(gid); else openDetail(gid);
+    });
+  });
+  document.getElementById('btnDeleteNote').addEventListener('click', ()=>{
+    if(confirm('Delete note "'+n.title+'"? This cannot be undone.')){
+      notes = notes.filter(x=>x.id!==id);
+      saveNotes(); closeModal(); render();
+      toast('Note deleted');
+    }
+  });
+  function saveNote(){
+    n.title = document.getElementById('n_title').value.trim() || 'Untitled note';
+    n.tags = document.getElementById('n_tags').value.split(',').map(s=>s.trim()).filter(Boolean);
+    n.content = contentEl.value;
+    n.stub = false;
+    n.dateUpdated = nowIso();
+    resolveAndStubLinks(n.content, n.id);
+    if(n.content.trim()) recordActivity();
+    saveNotes(); closeModal(); render();
+    toast('Note saved');
+  }
+  document.getElementById('btnSaveNote').addEventListener('click', saveNote);
+  // Ctrl/Cmd+Enter saves from anywhere in the editor — the fastest path when you're mid-thought
+  modalRoot.addEventListener('keydown', (e)=>{
+    if((e.ctrlKey||e.metaKey) && e.key==='Enter'){ e.preventDefault(); saveNote(); }
+  });
+  if(n.stub) document.getElementById('n_title').focus(); else contentEl.focus();
+}
+function timeAgo(iso){
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff/60000);
+  if(mins<1) return 'just now';
+  if(mins<60) return mins+'m ago';
+  const hrs = Math.floor(mins/60); if(hrs<24) return hrs+'h ago';
+  return Math.floor(hrs/24)+'d ago';
+}
+
+/* ------------------------------ ADD PAPER MODAL ------------------------------ */
+function openAddPaper(){
+  const html = `
+  <div class="modal modal-md">
+    <div class="modal-head"><h2>Add a paper</h2><button class="btn btn-icon btn-ghost" data-close>✕</button></div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Paste a DOI, arXiv ID/URL, or just the title</label>
+        <div style="display:flex; gap:8px;">
+          <input id="lookupInput" placeholder="e.g. 10.48550/arXiv.1706.03762, arxiv.org/abs/1706.03762, or a title" style="flex:1;"/>
+          <button class="btn btn-primary" id="btnLookup">🔎 Fetch</button>
+        </div>
+        <div class="field-hint" id="lookupStatus">Free, no account needed — auto-fills everything below, including the title.</div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Title *</label><input id="a_title"/></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Authors</label><input id="a_authors"/></div>
+        <div class="field" style="max-width:110px;"><label>Year</label><input id="a_year" type="number"/></div>
+      </div>
+      <div class="field"><label>Tags (comma separated)</label><input id="a_tags" placeholder="nlp, survey, to-cite"/></div>
+
+      <details class="more-fields">
+        <summary></summary>
+        <div class="field-row">
+          <div class="field"><label>Venue</label><input id="a_venue"/></div>
+          <div class="field"><label>DOI</label><input id="a_doi"/></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>URL</label><input id="a_url"/></div>
+          <div class="field"><label>arXiv ID</label><input id="a_arxiv"/></div>
+        </div>
+        <div class="field"><label>Abstract</label><textarea id="a_abstract" rows="3"></textarea></div>
+      </details>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Status</label>
+          <select id="a_status">${settings.columns.map((c,i)=>`<option value="${c.id}" ${i===0?'selected':''}>${escapeHtml(c.label)}</option>`).join('')}</select>
+        </div>
+        <div class="field">
+          <label>Importance</label>
+          <select id="a_priority">
+            <option value="0">None</option><option value="1">Low</option><option value="2" selected>Medium</option>
+            <option value="3">High</option><option value="4">Critical</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn btn-primary" id="btnCreatePaper">Add paper</button>
+    </div>
+  </div>`;
+  showModal(html);
+  document.getElementById('lookupInput').focus();
+  document.getElementById('btnLookup').addEventListener('click', doLookup);
+  document.getElementById('lookupInput').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doLookup(); }});
+  document.getElementById('btnCreatePaper').addEventListener('click', ()=>{
+    const title = document.getElementById('a_title').value.trim();
+    if(!title){ toast('Title is required','err'); return; }
+    const p = {
+      id:uid(), title,
+      authors:document.getElementById('a_authors').value.trim(),
+      year:Number(document.getElementById('a_year').value)||null,
+      venue:document.getElementById('a_venue').value.trim(),
+      doi:document.getElementById('a_doi').value.trim(),
+      url:document.getElementById('a_url').value.trim(),
+      arxivId:document.getElementById('a_arxiv').value.trim(),
+      tags:document.getElementById('a_tags').value.split(',').map(s=>s.trim()).filter(Boolean),
+      abstract:document.getElementById('a_abstract').value.trim(),
+      status:document.getElementById('a_status').value,
+      priority:Number(document.getElementById('a_priority').value),
+      rating:0, citations:window.__lookupCitations||null, citationsUpdated: window.__lookupCitations?nowIso():null,
+      notes:'', relatedIds:[], dateAdded:nowIso()
+    };
+    window.__lookupCitations = null;
+    papers.unshift(p);
+    savePapers(); closeModal(); render();
+    toast('Paper added');
+    // If we don't have a citation count yet (added without using Fetch), quietly try
+    // to grab one in the background so numbers stay current with no extra clicks.
+    if(p.citations==null){ refreshCitations(p, {silent:true}).catch(()=>{}); }
+  });
+}
+async function doLookup(){
+  const q = document.getElementById('lookupInput').value.trim();
+  const statusEl = document.getElementById('lookupStatus');
+  const btn = document.getElementById('btnLookup');
+  if(!q){ statusEl.textContent = 'Paste something first — a DOI, arXiv ID/URL, or a title.'; return; }
+  btn.disabled = true; btn.textContent = '⏳ Fetching…';
+  statusEl.textContent = 'Looking up…';
+  try{
+    const meta = await fetchMetadata(q);
+    if(!meta){ statusEl.textContent = 'No match found — you can still fill the form in manually below.'; return; }
+    document.getElementById('a_title').value = meta.title || '';
+    document.getElementById('a_authors').value = meta.authors || '';
+    document.getElementById('a_year').value = meta.year || '';
+    document.getElementById('a_venue').value = meta.venue || '';
+    document.getElementById('a_doi').value = meta.doi || '';
+    document.getElementById('a_url').value = meta.url || '';
+    document.getElementById('a_arxiv').value = meta.arxivId || '';
+    document.getElementById('a_abstract').value = meta.abstract || '';
+    window.__lookupCitations = meta.citations || null;
+    statusEl.textContent = meta.citations!=null ? ('✓ Found — '+formatNum(meta.citations)+' citations. Check the fields below, then Add.') : '✓ Found — details filled in below.';
+  }catch(e){
+    statusEl.textContent = 'Couldn\'t reach the lookup service (offline or briefly rate-limited) — try again in a few seconds, or fill the form in manually.';
+  }finally{
+    btn.disabled = false; btn.textContent = '🔎 Fetch';
+  }
+}
+
+/* ------------------------------ METADATA LOOKUP (Semantic Scholar / CrossRef) ------------------------------ */
+const S2_FIELDS = 'title,abstract,year,authors,venue,citationCount,externalIds,url';
+function cleanQuery(s){
+  return (s||'').trim()
+    .replace(/^https?:\/\/(dx\.)?doi\.org\//i, '')
+    .replace(/^doi:\s*/i, '')
+    .replace(/^arxiv:\s*/i, '');
+}
+function isDoi(s){ s = cleanQuery(s); return /^10\.\d{4,9}\/\S+$/i.test(s); }
+function extractDoi(s){ s = cleanQuery(s); const m = s.match(/10\.\d{4,9}\/[^\s]+/); return m ? m[0].replace(/[.,]$/,'') : s; }
+// Recognizes a bare arXiv id, an arxiv.org URL in ANY form (/abs/, /pdf/, /pdf/....pdf, with or
+// without a version suffix, http or https, with or without www) — previously this only matched
+// /abs/ links, which silently failed to auto-fill for the very common case of pasting a /pdf/ link.
+function isArxiv(s){ s = cleanQuery(s); return /^\d{4}\.\d{4,5}(v\d+)?$/.test(s) || /arxiv\.org\//i.test(s) || /^arxiv[:\s]/i.test(s); }
+function extractArxiv(s){ s = cleanQuery(s); const m = s.match(/(\d{4}\.\d{4,5})(v\d+)?/); return m ? m[1] : s; }
+function isS2Url(s){ return /semanticscholar\.org\/paper\/[^\s]+\/([a-f0-9]{20,})/i.test(s); }
+function extractS2Id(s){ const m = s.match(/([a-f0-9]{20,})/i); return m ? m[1] : s; }
+
+// fetch with a timeout so a slow/blocked network never leaves the UI hanging or ambiguous
+async function fetchWithTimeout(url, ms){
+  const ctrl = new AbortController();
+  const t = setTimeout(()=>ctrl.abort(), ms || 8000);
+  try{ return await fetch(url, {signal:ctrl.signal}); }
+  finally{ clearTimeout(t); }
+}
+// GETs a Semantic Scholar URL, retrying once after a short pause on a 429 (shared free-tier rate limit)
+async function s2Fetch(url){
+  let res = await fetchWithTimeout(url, 8000);
+  if(res.status===429){
+    await new Promise(r=>setTimeout(r, 1500));
+    res = await fetchWithTimeout(url, 8000);
+  }
+  return res;
+}
+async function s2Lookup(url){
+  try{
+    const res = await s2Fetch(url);
+    if(!res.ok) return null;
+    const json = await res.json();
+    return json.data ? (json.data[0]||null) : json;
+  }catch(e){ return null; }
+}
+async function crossrefLookup(doi){
+  try{
+    const res = await fetchWithTimeout(`https://api.crossref.org/works/${encodeURIComponent(extractDoi(doi))}`, 8000);
+    if(!res.ok) return null;
+    const j = await res.json();
+    const m = j.message;
+    return {
+      title: (m.title||[])[0] || '',
+      authors: (m.author||[]).map(a=>[a.given,a.family].filter(Boolean).join(' ')).join(', '),
+      year: (m.issued && m.issued['date-parts'] && m.issued['date-parts'][0][0]) || null,
+      venue: (m['container-title']||[])[0] || '',
+      doi: m.DOI || extractDoi(doi),
+      url: m.URL || '',
+      arxivId: '', abstract: (m.abstract||'').replace(/<[^>]+>/g,''), citations: m['is-referenced-by-count']||null
+    };
+  }catch(e){ return null; }
+}
+// arXiv's own Export API, queried directly (in parallel with Semantic Scholar) whenever the
+// query is arXiv-shaped, so an arXiv link/id fills in reliably even when S2 hasn't indexed the
+// paper yet or is rate-limited — arXiv's metadata is treated as authoritative for title/authors/
+// year/abstract/url/doi, while S2's citation count (which arXiv doesn't have) is layered on top.
+async function arxivApiLookup(arxivId){
+  try{
+    const res = await fetchWithTimeout(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(arxivId)}`, 8000);
+    if(!res.ok) return null;
+    const xml = await res.text();
+    const doc = new DOMParser().parseFromString(xml, 'text/xml');
+    if(doc.querySelector('parsererror')) return null;
+    const entry = doc.querySelector('entry');
+    if(!entry) return null;
+    const titleEl = entry.querySelector('title');
+    const title = titleEl ? titleEl.textContent.replace(/\s+/g,' ').trim() : '';
+    if(!title) return null;
+    const summaryEl = entry.querySelector('summary');
+    const abstract = summaryEl ? summaryEl.textContent.replace(/\s+/g,' ').trim() : '';
+    const authors = Array.from(entry.querySelectorAll('author > name')).map(n=>n.textContent.trim()).filter(Boolean).join(', ');
+    const publishedEl = entry.querySelector('published');
+    const year = publishedEl && publishedEl.textContent ? Number(publishedEl.textContent.slice(0,4)) : null;
+    let doi = '';
+    const doiEls = entry.getElementsByTagNameNS('http://arxiv.org/schemas/atom','doi');
+    if(doiEls && doiEls[0]) doi = doiEls[0].textContent.trim();
+    const altLink = entry.querySelector('link[rel="alternate"]');
+    const url = (altLink && altLink.getAttribute('href')) || `https://arxiv.org/abs/${arxivId}`;
+    return {title, authors, year, venue:'', doi, arxivId, url, abstract, citations:null};
+  }catch(e){ return null; }
+}
+function normalizeS2(data, query){
+  if(!data) return null;
+  return {
+    title: data.title || '',
+    authors: (data.authors||[]).map(a=>a.name).join(', '),
+    year: data.year || null,
+    venue: data.venue || '',
+    doi: (data.externalIds && data.externalIds.DOI) || (isDoi(query)?extractDoi(query):''),
+    arxivId: (data.externalIds && data.externalIds.ArXiv) || (isArxiv(query)?extractArxiv(query):''),
+    url: data.url || '',
+    abstract: data.abstract || '',
+    citations: (typeof data.citationCount==='number') ? data.citationCount : null
+  };
+}
+// Tries, in order: the classified id (DOI/arXiv/S2 URL) → a plain-text search on the same
+// string → CrossRef (DOI only). Any single step failing (network hiccup, rate limit, no
+// match) just falls through to the next rather than giving up.
+async function fetchMetadata(rawQuery){
+  const query = cleanQuery(rawQuery);
+  if(!query) return null;
+
+  if(isS2Url(query)){
+    const data = await s2Lookup(`https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(extractS2Id(query))}?fields=${S2_FIELDS}`);
+    if(data) return normalizeS2(data, query);
+  }
+  if(isDoi(query)){
+    const data = await s2Lookup(`https://api.semanticscholar.org/graph/v1/paper/DOI:${encodeURIComponent(extractDoi(query))}?fields=${S2_FIELDS}`);
+    if(data) return normalizeS2(data, query);
+  }
+  if(isArxiv(query)){
+    const arxivId = extractArxiv(query);
+    // query arXiv's own API and Semantic Scholar at the same time — arXiv is authoritative
+    // for the paper's own metadata, S2 supplies the citation count arXiv doesn't track
+    const [s2Data, arxivData] = await Promise.all([
+      s2Lookup(`https://api.semanticscholar.org/graph/v1/paper/arXiv:${encodeURIComponent(arxivId)}?fields=${S2_FIELDS}`),
+      arxivApiLookup(arxivId)
+    ]);
+    const s2Norm = normalizeS2(s2Data, query);
+    if(arxivData || s2Norm){
+      return {
+        title: (arxivData && arxivData.title) || (s2Norm && s2Norm.title) || '',
+        authors: (arxivData && arxivData.authors) || (s2Norm && s2Norm.authors) || '',
+        year: (arxivData && arxivData.year) || (s2Norm && s2Norm.year) || null,
+        venue: (s2Norm && s2Norm.venue) || '',
+        doi: (arxivData && arxivData.doi) || (s2Norm && s2Norm.doi) || '',
+        arxivId,
+        url: (arxivData && arxivData.url) || (s2Norm && s2Norm.url) || `https://arxiv.org/abs/${arxivId}`,
+        abstract: (arxivData && arxivData.abstract) || (s2Norm && s2Norm.abstract) || '',
+        citations: (s2Norm && s2Norm.citations!=null) ? s2Norm.citations : null
+      };
+    }
+  }
+  // generic text search — works for titles, and as a fallback if a DOI/arXiv id above
+  // didn't resolve (e.g. very new papers not yet cross-indexed)
+  const searched = await s2Lookup(`https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&fields=${S2_FIELDS}&limit=1`);
+  if(searched) return normalizeS2(searched, query);
+
+  if(isDoi(query)){
+    const cr = await crossrefLookup(query);
+    if(cr) return cr;
+  }
+  return null;
+}
+
+async function refreshCitations(p, opts){
+  opts = opts===true ? {isModal:true} : (opts||{});
+  const query = p.doi ? p.doi : (p.arxivId ? p.arxivId : p.title);
+  try{
+    const meta = await fetchMetadata(query);
+    if(meta && meta.citations!=null){
+      p.citations = meta.citations;
+      p.citationsUpdated = nowIso();
+      savePapers();
+      if(!opts.silent) toast('Citation count updated: '+formatNum(meta.citations));
+      if(opts.isModal){
+        const el = document.getElementById('statCitations');
+        if(el) el.textContent = formatNum(meta.citations);
+        const hint = document.getElementById('statsUpdatedHint');
+        if(hint) hint.textContent = 'Last checked just now';
+      }
+      render();
+    } else if(!opts.silent){
+      toast('No citation data found for this paper','err');
+    }
+  }catch(e){
+    if(!opts.silent) toast('Could not reach Semantic Scholar (rate limited or offline)','err');
+  }
+}
+async function bulkRefreshCitations(targets, opts){
+  targets = targets || papers.slice(0,40); // safety cap per run
+  opts = opts || {};
+  if(!opts.quiet) toast('Refreshing citation stats for '+targets.length+' paper'+(targets.length===1?'':'s')+'…');
+  let changed = 0;
+  for(const p of targets){
+    const before = p.citations;
+    await refreshCitations(p, {silent:true});
+    if(p.citations!==before) changed++;
+    await new Promise(r=>setTimeout(r, 1100)); // be polite to the free API
+  }
+  if(!opts.quiet) toast(changed ? `Refreshed ${changed} of ${targets.length} citation count${targets.length===1?'':'s'}.` : 'No updates found.', 'ok');
+  return changed;
+}
+// Quietly tops up citation counts for papers that have never been checked or are
+// >14 days stale, a few at a time, whenever the app loads — so numbers stay fresh
+// without you ever needing to click "refresh."
+function autoRefreshStaleCitations(){
+  const staleCutoff = Date.now() - 14*86400000;
+  const stale = papers.filter(p => !p.citationsUpdated || new Date(p.citationsUpdated).getTime() < staleCutoff).slice(0,5);
+  if(stale.length) bulkRefreshCitations(stale, {quiet:true});
+}
+
+/* ------------------------------ STREAK WIDGET + REMINDERS ------------------------------ */
+function renderStreakButton(){
+  const btn = document.getElementById('btnStreak');
+  if(!btn) return;
+  const streak = currentStreak();
+  const loggedToday = hasActivity(todayStr());
+  btn.textContent = `🔥 ${streak}`;
+  btn.title = streak>0
+    ? (loggedToday ? `${streak}-day streak — you've already written today, nice.` : `${streak}-day streak — write something today to keep it going.`)
+    : 'No active streak yet — save a note today to start one.';
+  btn.style.color = streak>0 ? 'var(--warn)' : '';
+  btn.classList.toggle('is-active', streak>0);
+}
+function maybeNudge(){
+  const gap = daysSinceLastActivity();
+  const key = 'pt_nudge_shown_' + todayStr();
+  if(gap>=2 && gap!==Infinity && !sessionStorage.getItem(key)){
+    sessionStorage.setItem(key,'1');
+    toast(`It's been ${gap} days since you wrote any notes — open a paper and jot a quick thought.`);
+  }
+}
+// 0 saves -> level 0, 1 save -> level 1, 2-3 saves -> level 2, 4+ saves -> level 3
+// (uses the already-defined-but-previously-unused .heat-cell[data-lvl] CSS levels)
+function heatLevel(count){
+  if(!count) return 0;
+  if(count===1) return 1;
+  if(count<=3) return 2;
+  return 3;
+}
+function openStreakPopover(){
+  const streak = currentStreak(), longest = longestStreak();
+  const daysLogged = Object.keys(activity).filter(k=>activity[k]>0).length;
+  const days = [];
+  const today = new Date();
+  for(let i=97; i>=0; i--){
+    const d = new Date(today); d.setDate(d.getDate()-i);
+    const s = todayStr(d);
+    days.push({date:s, count: activity[s]||0});
+  }
+  const dowLabels = ['','Mon','','Wed','','Fri',''];
+  const html = `
+  <div class="modal modal-sm">
+    <div class="modal-head"><h2>🔥 Writing streak</h2><button class="btn btn-icon btn-ghost" data-close>✕</button></div>
+    <div class="modal-body streak-pop">
+      <div class="streak-stats">
+        <div><div class="num">${streak}</div><div class="lbl">CURRENT STREAK</div></div>
+        <div><div class="num">${longest}</div><div class="lbl">LONGEST STREAK</div></div>
+        <div><div class="num">${daysLogged}</div><div class="lbl">DAYS LOGGED</div></div>
+      </div>
+      <div class="heatmap-wrap">
+        <div class="heatmap-days">${dowLabels.map(l=>`<div>${l}</div>`).join('')}</div>
+        <div class="heatmap">${days.map(d=>`<div class="heat-cell" data-lvl="${heatLevel(d.count)}" title="${d.date}${d.count?` — ${d.count} save${d.count>1?'s':''}`:' — nothing saved'}"></div>`).join('')}</div>
+      </div>
+      <div class="heatmap-legend">Less <div class="heat-cell" data-lvl="0"></div><div class="heat-cell" data-lvl="1"></div><div class="heat-cell" data-lvl="2"></div><div class="heat-cell" data-lvl="3"></div> More</div>
+      <p class="field-hint" style="margin-top:10px;">Lights up any day you save notes on a paper or a standalone note — darker means more saves that day. Last ~14 weeks shown.</p>
+      <div class="field-hint" style="margin-top:10px;">Want a nudge on your phone? Settings → 🔔 Reminders has a one-click calendar reminder, plus an optional real push-notification recipe.</div>
+    </div>
+  </div>`;
+  showModal(html);
+}
+// Generates a downloadable .ics file with a recurring reminder — works with Google/Apple/
+// Outlook calendars on a phone, so it's a real notification with zero backend required.
+function downloadReminderIcs(){
+  const time = (document.getElementById('rem_time')||{}).value || settings.reminder.time || '19:00';
+  const days = (document.getElementById('rem_days')||{}).value || settings.reminder.days || 'daily';
+  const [hh,mm] = time.split(':').map(Number);
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0);
+  const pad = n => String(n).padStart(2,'0');
+  const fmt = d => `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}00`;
+  const rrule = days==='weekdays' ? 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR' : 'FREQ=DAILY';
+  const ics = [
+    'BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Paper Tracker//Reading Reminder//EN',
+    'BEGIN:VEVENT',
+    `UID:${uid()}@paper-tracker`,
+    `DTSTAMP:${fmt(now)}Z`,
+    `DTSTART:${fmt(start)}`,
+    `RRULE:${rrule}`,
+    'SUMMARY:📚 Reading time — jot a note',
+    'DESCRIPTION:Open Paper Tracker and add a thought to whatever you are reading.',
+    'END:VEVENT','END:VCALENDAR'
+  ].join('\r\n');
+  const blob = new Blob([ics], {type:'text/calendar'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'reading-reminder.ics';
+  a.click();
+  toast('Downloaded — open the file to add it to your phone\'s calendar app.','ok');
+}
+
+/* ------------------------------ SETTINGS MODAL ------------------------------ */
+function openSettings(){
+  const g = settings.github, w = settings.weights;
+  const html = `
+  <div class="modal modal-lg">
+    <div class="modal-head"><h2>Settings</h2><button class="btn btn-icon btn-ghost" data-close>✕</button></div>
+    <div class="modal-body">
+
+      <div class="settings-section">
+        <h3>🔢 Smart priority weights</h3>
+        <p class="desc">Controls the "Smart score" used to rank your reading list. Set your interest tags so unread papers matching your focus areas rank higher.</p>
+        <div class="weight-row"><label>Citations</label><input type="range" id="w_citation" min="0" max="1" step="0.05" value="${w.citation}"/><span class="val" id="wv_citation">${w.citation}</span></div>
+        <div class="weight-row"><label>Recency</label><input type="range" id="w_recency" min="0" max="1" step="0.05" value="${w.recency}"/><span class="val" id="wv_recency">${w.recency}</span></div>
+        <div class="weight-row"><label>Your rating</label><input type="range" id="w_manual" min="0" max="1" step="0.05" value="${w.manual}"/><span class="val" id="wv_manual">${w.manual}</span></div>
+        <div class="weight-row"><label>Interest tags</label><input type="range" id="w_tag" min="0" max="1" step="0.05" value="${w.tag}"/><span class="val" id="wv_tag">${w.tag}</span></div>
+        <div class="field"><label>Interest tags (comma separated)</label><input id="interestTags" value="${escapeHtml((settings.interestTags||[]).join(', '))}" placeholder="rag, agents, efficiency"/></div>
+      </div>
+
+      <div class="settings-section">
+        <h3>📈 Citation stats</h3>
+        <p class="desc">Pulls live citation counts from Semantic Scholar's free public API.</p>
+        <button class="btn" id="btnBulkRefresh">🔄 Refresh all citation counts</button>
+      </div>
+
+      <div class="settings-section">
+        <h3>☁️ Sync via your GitHub repo (optional)</h3>
+        <p class="desc">Store your data as a JSON file inside your own GitHub repo so it follows you across devices/browsers. Needs a
+        <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener">fine-grained personal access token</a> scoped to just this repo, with <strong>Contents: Read and write</strong> permission. The token is stored only in this browser's local storage and is sent only to api.github.com.</p>
+        <div class="field-row">
+          <div class="field"><label>Repo owner</label><input id="gh_owner" value="${escapeHtml(g.owner)}" placeholder="arezooaalipanah"/></div>
+          <div class="field"><label>Repo name</label><input id="gh_repo" value="${escapeHtml(g.repo)}" placeholder="paper-tracker"/></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Branch</label><input id="gh_branch" value="${escapeHtml(g.branch)}" placeholder="main"/></div>
+          <div class="field"><label>File path</label><input id="gh_path" value="${escapeHtml(g.path)}" placeholder="data/papers.json"/></div>
+        </div>
+        <div class="field"><label>Personal access token</label><input id="gh_token" type="password" value="${escapeHtml(g.token)}" placeholder="github_pat_…"/></div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn" id="btnGhPush">⬆️ Push data to GitHub</button>
+          <button class="btn" id="btnGhPull">⬇️ Pull data from GitHub</button>
+        </div>
+        <div class="field-hint" id="ghStatus"></div>
+      </div>
+
+      <div class="settings-section">
+        <h3>💾 Local backup</h3>
+        <p class="desc">Your data always lives in this browser's local storage first. Export/import a JSON backup any time.</p>
+        <div style="display:flex; gap:8px;">
+          <button class="btn" id="btnExport">⬇️ Export JSON</button>
+          <label class="btn" style="margin:0;">⬆️ Import JSON<input type="file" id="importFile" accept="application/json" style="display:none;"/></label>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>🎨 Board columns</h3>
+        <p class="desc">Rename, remove, or reorder your Trello-style status columns.</p>
+        <div id="colEditor"></div>
+      </div>
+
+      <div class="settings-section">
+        <h3>🔔 Reminders — build the writing habit</h3>
+        <p class="desc">A recurring calendar alarm on your phone, generated locally — no account, no server.</p>
+        <div class="reminder-row">
+          <label style="font-weight:600; font-size:12.5px;">Time <input id="rem_time" type="time" value="${escapeHtml(settings.reminder.time)}" style="width:auto; padding:6px 8px; border:1px solid var(--border); border-radius:7px; background:var(--bg-sunken);"/></label>
+          <label style="font-weight:600; font-size:12.5px;">Days
+            <select id="rem_days" style="padding:6px 8px; border:1px solid var(--border); border-radius:7px; background:var(--bg-sunken);">
+              <option value="daily" ${settings.reminder.days==='daily'?'selected':''}>Every day</option>
+              <option value="weekdays" ${settings.reminder.days==='weekdays'?'selected':''}>Weekdays</option>
+            </select>
+          </label>
+        </div>
+        <button class="btn" id="btnDownloadIcs">📅 Download calendar reminder</button>
+        <p class="desc" style="margin-top:12px;">Want an actual push notification on your phone instead of a calendar alert? Install the free <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a> app, subscribe to a topic name only you know, and a small GitHub Actions workflow (free, in your repo) can ping it on a schedule — ask me to wire this up when you're ready and I'll add the workflow file for you.</p>
+      </div>
+
+      <div class="settings-section">
+        <h3>🔗 Zotero</h3>
+        <p class="desc">Not connected yet. This app's data model already supports a "zoteroKey" field per paper, so wiring up a one-way import (Zotero API → this app) later is a small addition — ask any time you want it added.</p>
+      </div>
+
+    </div>
+    <div class="modal-foot"><button class="btn btn-primary" data-close>Done</button></div>
+  </div>`;
+  showModal(html);
+
+  ['citation','recency','manual','tag'].forEach(k=>{
+    const input = document.getElementById('w_'+k), val = document.getElementById('wv_'+k);
+    input.addEventListener('input', ()=>{ val.textContent = input.value; settings.weights[k] = Number(input.value); saveSettings(); render(); });
+  });
+  document.getElementById('interestTags').addEventListener('change', (e)=>{
+    settings.interestTags = e.target.value.split(',').map(s=>s.trim()).filter(Boolean);
+    saveSettings(); render();
+  });
+  document.getElementById('btnBulkRefresh').addEventListener('click', ()=>bulkRefreshCitations());
+  document.getElementById('btnDownloadIcs').addEventListener('click', ()=>{
+    settings.reminder.time = document.getElementById('rem_time').value || settings.reminder.time;
+    settings.reminder.days = document.getElementById('rem_days').value;
+    saveSettings();
+    downloadReminderIcs();
+  });
+
+  const ghStatus = document.getElementById('ghStatus');
+  function syncGhFields(){
+    settings.github = {
+      owner: document.getElementById('gh_owner').value.trim(),
+      repo: document.getElementById('gh_repo').value.trim(),
+      branch: document.getElementById('gh_branch').value.trim() || 'main',
+      path: document.getElementById('gh_path').value.trim() || 'data/papers.json',
+      token: document.getElementById('gh_token').value.trim()
+    };
+    saveSettings();
+  }
+  document.getElementById('btnGhPush').addEventListener('click', async ()=>{
+    syncGhFields();
+    ghStatus.textContent = 'Pushing…';
+    try{ await githubPush(); ghStatus.textContent = 'Pushed successfully at '+new Date().toLocaleTimeString(); toast('Synced to GitHub','ok'); }
+    catch(e){ ghStatus.textContent = 'Push failed: '+e.message; toast('GitHub push failed','err'); }
+  });
+  document.getElementById('btnGhPull').addEventListener('click', async ()=>{
+    syncGhFields();
+    if(!confirm('Pull will REPLACE your current local papers with the version stored on GitHub. Continue?')) return;
+    ghStatus.textContent = 'Pulling…';
+    try{ await githubPull(); ghStatus.textContent = 'Pulled successfully at '+new Date().toLocaleTimeString(); toast('Synced from GitHub','ok'); closeModal(); render(); }
+    catch(e){ ghStatus.textContent = 'Pull failed: '+e.message; toast('GitHub pull failed','err'); }
+  });
+
+  document.getElementById('btnExport').addEventListener('click', ()=>{
+    const blob = new Blob([JSON.stringify({papers, settings, notes, activity}, null, 2)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'paper-tracker-backup-'+new Date().toISOString().slice(0,10)+'.json';
+    a.click();
+  });
+  document.getElementById('importFile').addEventListener('change', (e)=>{
+    const file = e.target.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      try{
+        const parsed = JSON.parse(reader.result);
+        if(Array.isArray(parsed)) papers = parsed;
+        else if(parsed.papers) {
+          papers = parsed.papers;
+          if(parsed.settings) settings = Object.assign(structuredClone(DEFAULT_SETTINGS), parsed.settings);
+          if(parsed.notes) notes = parsed.notes;
+          if(parsed.activity) activity = normalizeActivity(parsed.activity);
+        }
+        savePapers(); saveSettings(); saveNotes(); saveActivity(); closeModal(); render(); renderStreakButton();
+        toast('Import complete','ok');
+      }catch(err){ toast('Invalid JSON file','err'); }
+    };
+    reader.readAsText(file);
+  });
+
+  renderColumnEditor();
+}
+function renderColumnEditor(){
+  const wrap = document.getElementById('colEditor');
+  if(!wrap) return;
+  wrap.innerHTML = settings.columns.map((c,i)=>`
+    <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+      <span class="column-dot" style="background:${c.color}"></span>
+      <input data-idx="${i}" class="col-label-input" value="${escapeHtml(c.label)}" style="flex:1; padding:6px 9px; border:1px solid var(--border); border-radius:7px; background:var(--bg-sunken);"/>
+      <button class="btn btn-sm btn-danger" data-remove-col="${i}" ${settings.columns.length<=1?'disabled':''}>Remove</button>
+    </div>`).join('');
+  wrap.querySelectorAll('.col-label-input').forEach(inp=>{
+    inp.addEventListener('change', ()=>{ settings.columns[Number(inp.getAttribute('data-idx'))].label = inp.value; saveSettings(); render(); });
+  });
+  wrap.querySelectorAll('[data-remove-col]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const idx = Number(btn.getAttribute('data-remove-col'));
+      const removed = settings.columns[idx];
+      const fallback = settings.columns.find((c,i)=>i!==idx);
+      papers.forEach(p=>{ if(p.status===removed.id) p.status = fallback.id; });
+      settings.columns.splice(idx,1);
+      savePapers(); saveSettings(); renderColumnEditor(); render();
+    });
+  });
+}
+
+/* ------------------------------ GITHUB SYNC ------------------------------ */
+async function githubApi(path, opts){
+  const g = settings.github;
+  if(!g.owner || !g.repo || !g.token) throw new Error('Fill in owner, repo, and token first.');
+  const res = await fetch(`https://api.github.com/repos/${g.owner}/${g.repo}/contents/${path}`, Object.assign({
+    headers:{ 'Authorization':'Bearer '+g.token, 'Accept':'application/vnd.github+json' }
+  }, opts||{}));
+  return res;
+}
+async function githubPush(){
+  const g = settings.github;
+  const content = btoa(unescape(encodeURIComponent(JSON.stringify({papers, settings, notes, activity}, null, 2))));
+  let sha = undefined;
+  const getRes = await githubApi(`${g.path}?ref=${g.branch}`);
+  if(getRes.ok){ const j = await getRes.json(); sha = j.sha; }
+  const putRes = await githubApi(g.path, {
+    method:'PUT',
+    headers:{ 'Authorization':'Bearer '+g.token, 'Accept':'application/vnd.github+json', 'Content-Type':'application/json' },
+    body: JSON.stringify({ message:'Update paper-tracker data', content, branch:g.branch, sha })
+  });
+  if(!putRes.ok){ const err = await putRes.json().catch(()=>({})); throw new Error(err.message || ('HTTP '+putRes.status)); }
+}
+async function githubPull(){
+  const g = settings.github;
+  const res = await githubApi(`${g.path}?ref=${g.branch}`);
+  if(!res.ok){ const err = await res.json().catch(()=>({})); throw new Error(err.message || ('HTTP '+res.status)); }
+  const j = await res.json();
+  const decoded = decodeURIComponent(escape(atob(j.content)));
+  const parsed = JSON.parse(decoded);
+  if(parsed.papers) papers = parsed.papers;
+  if(parsed.settings) settings = Object.assign(structuredClone(DEFAULT_SETTINGS), parsed.settings);
+  if(parsed.notes) notes = parsed.notes;
+  if(parsed.activity) activity = normalizeActivity(parsed.activity);
+  savePapers(); saveSettings(); saveNotes(); saveActivity(); renderStreakButton();
+}
+
+/* ------------------------------ MODAL PLUMBING ------------------------------ */
+function showModal(innerHtml){
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `<div class="overlay" id="overlay">${innerHtml}</div>`;
+  const overlay = document.getElementById('overlay');
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) closeModal(); });
+  root.querySelectorAll('[data-close]').forEach(el=> el.addEventListener('click', closeModal));
+  document.addEventListener('keydown', escCloseOnce);
+}
+function escCloseOnce(e){ if(e.key==='Escape'){ closeModal(); } }
+function closeModal(){
+  document.getElementById('modalRoot').innerHTML = '';
+  document.removeEventListener('keydown', escCloseOnce);
+}
+
+/* ------------------------------ TOP-LEVEL WIRING ------------------------------ */
+function switchView(v){
+  currentView = v;
+  document.querySelectorAll('#viewSwitch button').forEach(b=> b.classList.toggle('active', b.getAttribute('data-view')===v));
+  document.getElementById('boardView').classList.toggle('hidden', v!=='board');
+  document.getElementById('graphView').classList.toggle('hidden', v!=='graph');
+  document.getElementById('notesGraphView').classList.toggle('hidden', v!=='notesgraph');
+  document.getElementById('listView').classList.toggle('hidden', v!=='list');
+  document.getElementById('viewPane').classList.toggle('no-scroll', v==='graph' || v==='notesgraph');
+  render();
+}
+
+function init(){
+  loadState();
+  document.querySelectorAll('#viewSwitch button').forEach(b=> b.addEventListener('click', ()=>switchView(b.getAttribute('data-view'))));
+  document.getElementById('searchInput').addEventListener('input', debounce((e)=>{ searchQuery=e.target.value; render(); }, 150));
+  document.getElementById('sortSelect').addEventListener('change', (e)=>{ sortMode=e.target.value; render(); });
+  document.getElementById('btnAddPaper').addEventListener('click', openAddPaper);
+  document.getElementById('btnSettings').addEventListener('click', openSettings);
+  document.getElementById('btnStreak').addEventListener('click', openStreakPopover);
+  document.getElementById('btnTheme').addEventListener('click', ()=>{
+    const cur = document.documentElement.getAttribute('data-theme');
+    const next = cur==='dark' ? 'light' : (cur==='light' ? '' : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'light' : 'dark'));
+    if(next===''){ document.documentElement.removeAttribute('data-theme'); localStorage.removeItem(LS_THEME); }
+    else { document.documentElement.setAttribute('data-theme', next); localStorage.setItem(LS_THEME, next); }
+  });
+  window.addEventListener('resize', debounce(()=>{ if(currentView==='graph' || currentView==='notesgraph') render(); }, 300));
+  render();
+  renderStreakButton();
+  if(settings.seeded){ toast('Loaded with a few sample papers (and two linked notes — check the Notes graph) so you can explore — edit or delete them any time.'); }
+  setTimeout(maybeNudge, 900);
+  setTimeout(autoRefreshStaleCitations, 1500);
+}
+
+document.addEventListener('DOMContentLoaded', init);
+})();
+</script>
+</body>
+</html>
